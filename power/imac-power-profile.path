@@ -1,0 +1,11 @@
+[Unit]
+Description=Watch power-profiles-daemon for profile changes
+
+[Path]
+# The directory, not the file: the daemon may replace state.ini by rename,
+# which a watch on the file itself would miss.
+PathChanged=/var/lib/power-profiles-daemon/
+Unit=imac-power-profile.service
+
+[Install]
+WantedBy=multi-user.target

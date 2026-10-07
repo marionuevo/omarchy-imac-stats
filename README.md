@@ -39,6 +39,25 @@ The curve applies to the hotter of CPU and GPU. In every mode, 90°C or more mea
 
 The mode lives in `/var/lib/imac-fan/mode`, the only file the desktop user may write; the daemon treats anything that isn't a known mode as `normal`. It survives reboots. The daemon publishes what it is doing in `/run/imac-fan/status.json`, which the widget reads.
 
+## Power profiles that do something
+
+The i5-4690 is a Haswell without HWP, so the kernel runs `intel_pstate` in passive mode and `power-profiles-daemon` has nothing to write but the energy-performance bias, which Haswell all but ignores. Measured with 4 busy threads in **power-saver**: 3.69 GHz and 64 W, the same as performance. Any profile picker (Omarchy's menu, [omarchy-power-widget](https://github.com/marionuevo/omarchy-power-widget)) switches the profile, and nothing changes.
+
+`power/imac-power-profile` applies real limits whenever the profile changes (a systemd path unit watches `/var/lib/power-profiles-daemon/`) and once at boot, since the firmware resets RAPL every boot:
+
+| Profile | Turbo | Max frequency | Governor | PL1 (RAPL long term) | Radeon DPM |
+|---------|-------|---------------|----------|----------------------|------------|
+| **power-saver** | off | 2.4 GHz | `schedutil` | 35 W | `low` |
+| **balanced** | on | 3.9 GHz | `schedutil` | firmware default (100 W) | `auto` |
+| **performance** | on | 3.9 GHz | `performance` | firmware default | `auto` |
+
+The firmware's PL1 is saved to `/var/lib/imac-power/pl1-default` the first time the script runs, so balanced and performance restore exactly what Apple set. Each switch is logged:
+
+```sh
+sudo ~/.config/omarchy/plugins/marionuevo.imac-stats/power/install.sh
+journalctl -t imac-power-profile
+```
+
 ## Installation
 
 ```sh
