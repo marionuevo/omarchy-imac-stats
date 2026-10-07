@@ -1,0 +1,24 @@
+[Unit]
+Description=iMac fan control from max(CPU, GPU) temperature
+Conflicts=mbpfan.service
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/imac-fand
+# Belt and braces: if the daemon is killed without running its own cleanup,
+# hand the fan back to the SMC's automatic control.
+ExecStopPost=/bin/sh -c 'for f in /sys/devices/platform/applesmc.*/fan1_manual; do echo 0 > "$f"; done'
+Restart=always
+RestartSec=2
+RuntimeDirectory=imac-fan
+RuntimeDirectoryMode=0755
+StateDirectory=imac-fan
+StateDirectoryMode=0755
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

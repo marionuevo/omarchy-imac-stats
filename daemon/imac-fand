@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""Drive the iMac's single fan from the hotter of CPU and GPU.
+
+mbpfan only looks at coretemp, so a GPU-only load (a game, glmark2) cooks
+the Radeon while the fan sits at its 1200 rpm floor. This daemon takes
+max(CPU, GPU) every second and maps it onto the SMC's fan target.
+
+Runs as root under systemd, independent of the shell: if the bar plugin or
+the whole desktop dies, the fan keeps being regulated. On exit the fan is
+handed back to the SMC's own automatic control (fan1_manual = 0), and the
+unit's ExecStopPost does the same in case this process is killed outright.
+
+The mode (silent / normal / full) comes from a one-word file the desktop
+user may write; anything that is not a known mode reads as "normal".
+"""
+import glob
+import json
+import os
+import signal
+import sys
+import time
+
+MODE_FILE = "/var/lib/imac-fan/mode"
+STATUS_FILE = "/run/imac-fan/status.json"
+INTERVAL = 1.0
+
+# Curves as (temp where the fan leaves its floor, temp where it reaches max),
+# applied to max(CPU, GPU). The Radeon idles around 55°C on the desktop, so
+# both knees sit above that or the fan would never rest.
+CURVES = {
+    "silent": (68, 90),
+    "normal": (60, 85),
+}
+
+# Whatever the mode, this hot means full speed. The i5-4690 throttles at
+# 100°C and the GPU's own crit is 120°C; 90°C is well short of either.
+PANIC_TEMP = 90
+
+# Ramp limits per tick. Up is fast so a load spike is met within a couple of
+# seconds; down is slow so the fan doesn't hunt on bursty loads.
+RAMP_UP_RPM = 400
+RAMP_DOWN_RPM = 40
+# Changes smaller than this are not worth an SMC write.
+DEADBAND_RPM = 20
+
+
+def smc_path():
+    for path in glob.glob("/sys/devices/platform/applesmc.*"):
+        if os.path.exists(os.path.join(path, "fan1_output")):
+            return path
+    return None
+
+
+def hwmon_chip(name):
+    for f in glob.glob("/sys/class/hwmon/hwmon*/name"):
+        try:
+            if open(f).read().strip() == name:
+                return os.path.dirname(f)
+        except OSError:
+            pass
+    return None
+
+
+def read_int(path):
+    try:
+        return int(open(path).read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def write_int(path, value):
+    try:
+        with open(path, "w") as f:
+            f.write(str(int(value)))
+        return True
+    except OSError:
+        return False
+
+
+def temp_by_label(base, label):
+    if not base:
+        return None
+    for f in glob.glob(base + "/temp*_label"):
+        try:
+            if open(f).read().strip() != label:
+                continue
+        except OSError:
+            continue
+        value = read_int(f[:-len("_label")] + "_input")
+        return value / 1000 if value is not None else None
+    return None
+
+
+def cpu_temp():
+    return temp_by_label(hwmon_chip("coretemp"), "Package id 0")
+
+
+def gpu_temp(smc):
+    # amdgpu's edge sensor first; the SMC's own GPU die probe (TG0D) tracks
+    # it within a degree and covers the case where amdgpu isn't loaded.
+    t = temp_by_label(hwmon_chip("amdgpu"), "edge")
+    if t is None:
+        t = temp_by_label(smc, "TG0D")
+    # The SMC reports absent probes as -127 and similar; ignore nonsense.
+    return t if t is not None and 0 < t < 150 else None
+
+
+def read_mode():
+    try:
+        with open(MODE_FILE) as f:
+            mode = f.read(16).strip()
+    except OSError:
+        return "normal"
+    return mode if mode in ("silent", "normal", "full") else "normal"
+
+
+def curve_target(temp, mode, lo, hi):
+    if temp is None or mode == "full" or temp >= PANIC_TEMP:
+        return hi
+    start, end = CURVES[mode]
+    if temp <= start:
+        return lo
+    if temp >= end:
+        return hi
+    return lo + (hi - lo) * (temp - start) / (end - start)
+
+
+def write_status(status):
+    try:
+        os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
+        tmp = STATUS_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(status, f)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, STATUS_FILE)
+    except OSError:
+        pass
+
+
+def release(smc):
+    write_int(os.path.join(smc, "fan1_manual"), 0)
+
+
+def main():
+    smc = smc_path()
+    if not smc:
+        print("applesmc fan not found", file=sys.stderr)
+        return 1
+
+    lo = read_int(os.path.join(smc, "fan1_min")) or 1200
+    hi = read_int(os.path.join(smc, "fan1_max")) or 2700
+
+    def stop(signum, frame):
+        release(smc)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+
+    if not write_int(os.path.join(smc, "fan1_manual"), 1):
+        print("cannot take manual control of fan1", file=sys.stderr)
+        return 1
+
+    current = read_int(os.path.join(smc, "fan1_output")) or lo
+    try:
+        while True:
+            mode = read_mode()
+            cpu = cpu_temp()
+            gpu = gpu_temp(smc)
+            readings = [t for t in (cpu, gpu) if t is not None]
+            # No sensor at all means flying blind: run at max rather than min.
+            hottest = max(readings) if readings else None
+            source = None
+            if hottest is not None:
+                source = "gpu" if gpu is not None and gpu == hottest else "cpu"
+
+            want = curve_target(hottest, mode, lo, hi)
+            if want > current:
+                step = min(want, current + RAMP_UP_RPM)
+            else:
+                step = max(want, current - RAMP_DOWN_RPM)
+            step = int(round(max(lo, min(hi, step))))
+
+            if abs(step - current) >= DEADBAND_RPM or step in (lo, hi):
+                if step != current:
+                    write_int(os.path.join(smc, "fan1_output"), step)
+                current = step
+            # The SMC drops manual mode on some events (sleep/resume); take
+            # it back rather than silently leaving the fan to its own curve.
+            if read_int(os.path.join(smc, "fan1_manual")) != 1:
+                write_int(os.path.join(smc, "fan1_manual"), 1)
+                write_int(os.path.join(smc, "fan1_output"), current)
+
+            write_status({
+                "mode": mode,
+                "cpuTemp": cpu,
+                "gpuTemp": gpu,
+                "hottest": hottest,
+                "source": source,
+                "target": current,
+                "rpm": read_int(os.path.join(smc, "fan1_input")),
+                "min": lo,
+                "max": hi,
+                "time": time.time(),
+            })
+            time.sleep(INTERVAL)
+    finally:
+        release(smc)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

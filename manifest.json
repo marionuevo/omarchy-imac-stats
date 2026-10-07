@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "marionuevo.imac-stats",
+  "name": "iMac Stats",
+  "version": "1.0.0",
+  "author": "marionuevo",
+  "description": "Fan RPM, CPU/GPU temps and usage on an iMac, with a fan driven by whichever runs hotter",
+  "license": "MIT",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "ImacStats.qml"
+  },
+  "barWidget": {
+    "displayName": "iMac Stats",
+    "description": "Fan RPM, CPU/GPU temps and usage, click for fan modes",
+    "category": "System",
+    "allowMultiple": false
+  }
+}
