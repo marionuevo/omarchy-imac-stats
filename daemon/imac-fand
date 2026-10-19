@@ -7,8 +7,8 @@ max(CPU, GPU) every second and maps it onto the SMC's fan target.
 
 Runs as root under systemd, independent of the shell: if the bar plugin or
 the whole desktop dies, the fan keeps being regulated. On exit the fan is
-handed back to the SMC's own automatic control (fan1_manual = 0), and the
-unit's ExecStopPost does the same in case this process is killed outright.
+handed back to the SMC's own automatic control, and the unit's
+ExecStopPost does the same in case this process is killed outright.
 
 The mode (silent / normal / full) comes from a one-word file the desktop
 user may write; anything that is not a known mode reads as "normal".
@@ -19,6 +19,7 @@ import os
 import signal
 import sys
 import time
+from collections import namedtuple
 
 MODE_FILE = "/var/lib/imac-fan/mode"
 STATUS_FILE = "/run/imac-fan/status.json"
@@ -44,10 +45,21 @@ RAMP_DOWN_RPM = 40
 DEADBAND_RPM = 20
 
 
-def smc_path():
+# Where fan1 lives and what its controls are called. Up to kernel 7.2.5
+# applesmc had its own fan1_manual (1 manual, 0 auto) and fan1_output on the
+# platform device. Its conversion to hwmon_device_register_with_info (in
+# linux-omarchy 7.2.8) renamed them, with no aliases, to the standard
+# pwm1_enable (1 manual, 2 auto) and fan1_target under hwmon/hwmon*.
+Fan = namedtuple("Fan", "base enable target manual auto")
+
+
+def smc_fan():
     for path in glob.glob("/sys/devices/platform/applesmc.*"):
         if os.path.exists(os.path.join(path, "fan1_output")):
-            return path
+            return Fan(path, "fan1_manual", "fan1_output", 1, 0)
+        for hwmon in glob.glob(path + "/hwmon/hwmon*"):
+            if os.path.exists(os.path.join(hwmon, "fan1_target")):
+                return Fan(hwmon, "pwm1_enable", "fan1_target", 1, 2)
     return None
 
 
@@ -137,31 +149,34 @@ def write_status(status):
         pass
 
 
-def release(smc):
-    write_int(os.path.join(smc, "fan1_manual"), 0)
+def release(fan):
+    write_int(os.path.join(fan.base, fan.enable), fan.auto)
 
 
 def main():
-    smc = smc_path()
-    if not smc:
+    fan = smc_fan()
+    if not fan:
         print("applesmc fan not found", file=sys.stderr)
         return 1
+    smc = fan.base
+    enable = os.path.join(smc, fan.enable)
+    target = os.path.join(smc, fan.target)
 
     lo = read_int(os.path.join(smc, "fan1_min")) or 1200
     hi = read_int(os.path.join(smc, "fan1_max")) or 2700
 
     def stop(signum, frame):
-        release(smc)
+        release(fan)
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
 
-    if not write_int(os.path.join(smc, "fan1_manual"), 1):
+    if not write_int(enable, fan.manual):
         print("cannot take manual control of fan1", file=sys.stderr)
         return 1
 
-    current = read_int(os.path.join(smc, "fan1_output")) or lo
+    current = read_int(target) or lo
     try:
         while True:
             mode = read_mode()
@@ -183,13 +198,13 @@ def main():
 
             if abs(step - current) >= DEADBAND_RPM or step in (lo, hi):
                 if step != current:
-                    write_int(os.path.join(smc, "fan1_output"), step)
+                    write_int(target, step)
                 current = step
             # The SMC drops manual mode on some events (sleep/resume); take
             # it back rather than silently leaving the fan to its own curve.
-            if read_int(os.path.join(smc, "fan1_manual")) != 1:
-                write_int(os.path.join(smc, "fan1_manual"), 1)
-                write_int(os.path.join(smc, "fan1_output"), current)
+            if read_int(enable) != fan.manual:
+                write_int(enable, fan.manual)
+                write_int(target, current)
 
             write_status({
                 "mode": mode,
@@ -205,7 +220,7 @@ def main():
             })
             time.sleep(INTERVAL)
     finally:
-        release(smc)
+        release(fan)
 
 
 if __name__ == "__main__":

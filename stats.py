@@ -39,9 +39,10 @@ def temp_by_label(chip_name, label):
 
 
 def fan_rpm():
-    # applesmc registers no hwmon name file on this kernel, so go through the
-    # platform device instead of hwmon_chip().
-    for path in glob.glob("/sys/devices/platform/applesmc.*/fan1_input"):
+    # Up to kernel 7.2.5 applesmc kept fan1_input on the platform device with
+    # no hwmon name file; since 7.2.8 it sits under hwmon/hwmon*. Try both.
+    for path in (glob.glob("/sys/devices/platform/applesmc.*/fan1_input")
+                 + glob.glob("/sys/devices/platform/applesmc.*/hwmon/hwmon*/fan1_input")):
         try:
             return int(open(path).read().strip())
         except (OSError, ValueError):

@@ -11,7 +11,7 @@ Built for an iMac15,1 (Retina 5K, late 2014: i5-4690, Radeon R9 M290X/M295X) and
 
 `mbpfan` only reads `coretemp`. A GPU-only load (a game, `glmark2`) heats the Radeon while the fan sits at its 1200 rpm floor. `imac-fand` takes **max(CPU, GPU)** every second and sets the SMC fan target from that.
 
-It runs as a root systemd service, separate from the shell: if the bar or the whole desktop dies, the fan keeps being regulated. When the daemon stops, it hands the fan back to the SMC's automatic control (`fan1_manual = 0`); the unit's `ExecStopPost` does the same if the process is killed outright.
+It runs as a root systemd service, separate from the shell: if the bar or the whole desktop dies, the fan keeps being regulated. When the daemon stops, it hands the fan back to the SMC's automatic control (`fan1_manual = 0`, or `pwm1_enable = 2` on newer kernels); the unit's `ExecStopPost` does the same if the process is killed outright.
 
 ## Sensors
 
@@ -25,7 +25,7 @@ It runs as a root systemd service, separate from the shell: if the bar or the wh
 
 `gpu_busy_percent` is not implemented for this Southern Islands Radeon, so GPU usage comes from a one-second `radeontop` sample that overlaps the CPU sample.
 
-`applesmc` registers no hwmon `name` file on this kernel, so the fan is found through `/sys/devices/platform/applesmc.*`.
+The fan is found through `/sys/devices/platform/applesmc.*`. Up to kernel 7.2.5 `applesmc` keeps its own `fan1_manual` / `fan1_output` there and registers no hwmon `name` file. From `linux-omarchy` 7.2.8 the driver uses `hwmon_device_register_with_info`: the files move to `hwmon/hwmon*/` and the controls become the standard `pwm1_enable` (1 manual, 2 auto) and `fan1_target`, with no aliases. The daemon and the widget handle both.
 
 ## Fan modes
 

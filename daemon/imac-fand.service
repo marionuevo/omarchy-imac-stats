@@ -7,8 +7,9 @@ After=multi-user.target
 Type=simple
 ExecStart=/usr/local/bin/imac-fand
 # Belt and braces: if the daemon is killed without running its own cleanup,
-# hand the fan back to the SMC's automatic control.
-ExecStopPost=/bin/sh -c 'for f in /sys/devices/platform/applesmc.*/fan1_manual; do echo 0 > "$f"; done'
+# hand the fan back to the SMC's automatic control. Old applesmc names first
+# (kernel <= 7.2.5), then the hwmon ones; see smc_fan() in imac-fand.
+ExecStopPost=/bin/sh -c 'for f in /sys/devices/platform/applesmc.*/fan1_manual; do [ -e "$f" ] && echo 0 > "$f"; done; for f in /sys/devices/platform/applesmc.*/hwmon/hwmon*/pwm1_enable; do [ -e "$f" ] && echo 2 > "$f"; done; true'
 Restart=always
 RestartSec=2
 RuntimeDirectory=imac-fan
