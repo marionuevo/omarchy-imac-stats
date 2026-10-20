@@ -7,4 +7,7 @@ Type=oneshot
 ExecStart=/usr/local/bin/imac-power-profile
 
 [Install]
-WantedBy=multi-user.target
+# Pulled in by the daemon itself, not by multi-user.target: the daemon is
+# ordered after multi-user.target, so wanting this from there made an
+# ordering cycle and systemd dropped this job at every boot.
+WantedBy=power-profiles-daemon.service
