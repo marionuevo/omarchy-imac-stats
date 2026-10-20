@@ -41,8 +41,11 @@ put() {
 
 case "$profile" in
   power-saver)
+    # The Radeon stays on auto: pinned to its lowest DPM level it could not
+    # keep up with a 4K stream at 60 fps (imac-display receiver) and hung
+    # the gfx ring. It idles at the bottom level on auto anyway.
     no_turbo=1; governor=schedutil; max_khz=$SAVER_MAX_KHZ
-    pl1=$SAVER_PL1_UW; gpu=low ;;
+    pl1=$SAVER_PL1_UW; gpu=auto ;;
   performance)
     no_turbo=0; governor=performance; max_khz=
     pl1=$pl1_default; gpu=auto ;;

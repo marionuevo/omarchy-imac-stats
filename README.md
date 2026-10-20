@@ -47,9 +47,11 @@ The i5-4690 is a Haswell without HWP, so the kernel runs `intel_pstate` in passi
 
 | Profile | Turbo | Max frequency | Governor | PL1 (RAPL long term) | Radeon DPM |
 |---------|-------|---------------|----------|----------------------|------------|
-| **power-saver** | off | 2.4 GHz | `schedutil` | 35 W | `low` |
+| **power-saver** | off | 2.4 GHz | `schedutil` | 35 W | `auto` |
 | **balanced** | on | 3.9 GHz | `schedutil` | firmware default (100 W) | `auto` |
 | **performance** | on | 3.9 GHz | `performance` | firmware default | `auto` |
+
+The Radeon is left on `auto` in every profile. Pinned to `low` it could not keep up with a full-screen 4K stream at 60 fps and hung the GPU; on `auto` it already idles at its lowest level.
 
 The firmware's PL1 is saved to `/var/lib/imac-power/pl1-default` the first time the script runs, so balanced and performance restore exactly what Apple set. Each switch is logged:
 
