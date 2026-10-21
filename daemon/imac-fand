@@ -32,12 +32,14 @@ INTERVAL = 1.0
 # Curves per kind of sensor as (temp where the fan leaves its floor, temp
 # where it reaches max), in normal mode. The Radeon idles around 55°C on the
 # desktop, so its knee sits above that or the fan would never rest. Memory
-# idles near 48°C and reached 68°C with the fan at full speed under the 4K
-# stream; with the fan near its floor the SMC powered the iMac off.
+# reached 68°C (TM1a) with the fan at full speed under the 4K stream; with the
+# fan near its floor the SMC powered the iMac off. Showing a desktop it idles
+# at 53–54°C (TM1a, TM2d, next to the GPU), so its knee sits above that too:
+# with it at 50°C the fan never went below ~1500 rpm.
 CURVES = {
     "cpu": (60, 85),
     "gpu": (60, 85),
-    "memory": (50, 72),
+    "memory": (58, 72),
     "board": (60, 80),
 }
 # Silent mode moves both knees up by this much.
