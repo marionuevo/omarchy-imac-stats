@@ -20,5 +20,7 @@ chown "$OWNER" /var/lib/imac-fan/mode
 chmod 0644 /var/lib/imac-fan/mode
 
 systemctl daemon-reload
-systemctl enable --now imac-fand.service
+# restart, not just --now: an upgrade must replace a daemon already running.
+systemctl enable imac-fand.service
+systemctl restart imac-fand.service
 systemctl --no-pager status imac-fand.service | head -5

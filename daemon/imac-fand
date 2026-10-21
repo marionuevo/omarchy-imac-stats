@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Drive the iMac's single fan from the hotter of CPU and GPU.
+"""Drive the iMac's single fan from every temperature sensor it has.
 
 mbpfan only looks at coretemp, so a GPU-only load (a game, glmark2) cooks
-the Radeon while the fan sits at its 1200 rpm floor. This daemon takes
-max(CPU, GPU) every second and maps it onto the SMC's fan target.
+the Radeon while the fan sits at its 1200 rpm floor. CPU and GPU alone are
+not enough either: streaming a full-screen 4K picture at 60 fps kept both
+near 60°C, the fan near its floor, and the memory (SMC TM1a) climbed until
+the SMC cut the power. Every second this daemon reads coretemp, amdgpu and
+all of the SMC's own probes, puts each on the curve for its kind of sensor,
+and sets the SMC's fan target from whichever asks for the most.
 
 Runs as root under systemd, independent of the shell: if the bar plugin or
 the whole desktop dies, the fan keeps being regulated. On exit the fan is
@@ -25,13 +29,23 @@ MODE_FILE = "/var/lib/imac-fan/mode"
 STATUS_FILE = "/run/imac-fan/status.json"
 INTERVAL = 1.0
 
-# Curves as (temp where the fan leaves its floor, temp where it reaches max),
-# applied to max(CPU, GPU). The Radeon idles around 55°C on the desktop, so
-# both knees sit above that or the fan would never rest.
+# Curves per kind of sensor as (temp where the fan leaves its floor, temp
+# where it reaches max), in normal mode. The Radeon idles around 55°C on the
+# desktop, so its knee sits above that or the fan would never rest. Memory
+# idles near 48°C and reached 68°C with the fan at full speed under the 4K
+# stream; with the fan near its floor the SMC powered the iMac off.
 CURVES = {
-    "silent": (68, 90),
-    "normal": (60, 85),
+    "cpu": (60, 85),
+    "gpu": (60, 85),
+    "memory": (50, 72),
+    "board": (60, 80),
 }
+# Silent mode moves both knees up by this much.
+SILENT_SHIFT = (8, 5)
+
+# The SMC reports absent or broken probes as -127, 0, 1 and similar; nothing
+# inside a running iMac is really below this.
+PLAUSIBLE = (20, 127)
 
 # Whatever the mode, this hot means full speed. The i5-4690 throttles at
 # 100°C and the GPU's own crit is 120°C; 90°C is well short of either.
@@ -117,6 +131,39 @@ def gpu_temp(smc):
     return t if t is not None and 0 < t < 150 else None
 
 
+def kind(label):
+    # Apple's key names: TC CPU, TG GPU, TM/Tm memory; the rest (PCH, power
+    # supply, SSD, LCD, air) count as board.
+    if label.startswith("TC"):
+        return "cpu"
+    if label.startswith("TG"):
+        return "gpu"
+    if label.startswith(("TM", "Tm")):
+        return "memory"
+    return "board"
+
+
+def smc_probes(smc):
+    """{input file: label} for every SMC temperature."""
+    probes = {}
+    for f in glob.glob(smc + "/temp*_label"):
+        try:
+            probes[f[:-len("_label")] + "_input"] = open(f).read().strip()
+        except OSError:
+            pass
+    return probes
+
+
+def readings(smc, probes):
+    """[(name, kind, temp)] for every sensor that answers with a sane value."""
+    found = [("cpu", "cpu", cpu_temp()), ("gpu", "gpu", gpu_temp(smc))]
+    for path, label in probes.items():
+        value = read_int(path)
+        if value is not None:
+            found.append((label, kind(label), value / 1000))
+    return [(n, k, t) for n, k, t in found if t is not None and PLAUSIBLE[0] <= t < PLAUSIBLE[1]]
+
+
 def read_mode():
     try:
         with open(MODE_FILE) as f:
@@ -126,15 +173,26 @@ def read_mode():
     return mode if mode in ("silent", "normal", "full") else "normal"
 
 
-def curve_target(temp, mode, lo, hi):
-    if temp is None or mode == "full" or temp >= PANIC_TEMP:
-        return hi
-    start, end = CURVES[mode]
-    if temp <= start:
-        return lo
-    if temp >= end:
-        return hi
-    return lo + (hi - lo) * (temp - start) / (end - start)
+def demand(temp, sensor_kind, mode):
+    """How far along its curve a sensor is: 0 at the floor, 1 at max."""
+    start, end = CURVES[sensor_kind]
+    if mode == "silent":
+        start, end = start + SILENT_SHIFT[0], end + SILENT_SHIFT[1]
+    if sensor_kind in ("cpu", "gpu") and temp >= PANIC_TEMP:
+        return 1.0
+    return min(1.0, max(0.0, (temp - start) / (end - start)))
+
+
+def curve_target(found, mode, lo, hi):
+    """The fan target and the sensor that set it, as (rpm, (name, kind, temp))."""
+    # No sensor at all means flying blind: run at max rather than min.
+    if not found:
+        return hi, None
+    # The sensor asking for the most; at rest, the hottest of CPU and GPU.
+    driver = max(found, key=lambda r: (demand(r[2], r[1], mode), r[1] in ("cpu", "gpu"), r[2]))
+    if mode == "full":
+        return hi, driver
+    return lo + (hi - lo) * demand(driver[2], driver[1], mode), driver
 
 
 def write_status(status):
@@ -164,6 +222,7 @@ def main():
 
     lo = read_int(os.path.join(smc, "fan1_min")) or 1200
     hi = read_int(os.path.join(smc, "fan1_max")) or 2700
+    probes = smc_probes(smc)
 
     def stop(signum, frame):
         release(fan)
@@ -180,16 +239,9 @@ def main():
     try:
         while True:
             mode = read_mode()
-            cpu = cpu_temp()
-            gpu = gpu_temp(smc)
-            readings = [t for t in (cpu, gpu) if t is not None]
-            # No sensor at all means flying blind: run at max rather than min.
-            hottest = max(readings) if readings else None
-            source = None
-            if hottest is not None:
-                source = "gpu" if gpu is not None and gpu == hottest else "cpu"
-
-            want = curve_target(hottest, mode, lo, hi)
+            found = readings(smc, probes)
+            temps = {n: t for n, _, t in found}
+            want, driver = curve_target(found, mode, lo, hi)
             if want > current:
                 step = min(want, current + RAMP_UP_RPM)
             else:
@@ -208,10 +260,13 @@ def main():
 
             write_status({
                 "mode": mode,
-                "cpuTemp": cpu,
-                "gpuTemp": gpu,
-                "hottest": hottest,
-                "source": source,
+                "cpuTemp": temps.get("cpu"),
+                "gpuTemp": temps.get("gpu"),
+                # The sensor driving the fan: its name ("cpu", "gpu" or an SMC
+                # key such as TM1a), its kind and its temperature.
+                "sensor": driver[0] if driver else None,
+                "source": driver[1] if driver else None,
+                "hottest": driver[2] if driver else None,
                 "target": current,
                 "rpm": read_int(os.path.join(smc, "fan1_input")),
                 "min": lo,

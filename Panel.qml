@@ -75,10 +75,16 @@ Panel {
     return (value === undefined || value === null) ? ("--" + unit) : (value + unit)
   }
 
-  // The hotter of the two is what the daemon follows.
+  // The sensor the daemon follows: CPU, GPU, or one of the SMC's memory or
+  // board probes. Without the daemon, the hotter of CPU and GPU.
   readonly property bool gpuHotter: stats.source === "gpu" ||
     (stats.source == null && stats.gpuTemp != null && (stats.cpuTemp == null || stats.gpuTemp > stats.cpuTemp))
-  readonly property var hottest: gpuHotter ? stats.gpuTemp : stats.cpuTemp
+  readonly property bool smcDriven: stats.source === "memory" || stats.source === "board"
+  readonly property var hottest: smcDriven ? stats.hottest : (gpuHotter ? stats.gpuTemp : stats.cpuTemp)
+  readonly property string driverIcon: stats.source === "memory" ? "󰍛" :
+    stats.source === "board" ? "󰘚" : (gpuHotter ? "󰢮" : "\uf2db")
+  readonly property string driverName: stats.source === "memory" ? "Memory " + stats.sensor :
+    stats.source === "board" ? "Board " + stats.sensor : (gpuHotter ? "GPU" : "CPU")
 
   onOpenedChanged: {
     if (opened) {
@@ -158,7 +164,7 @@ Panel {
 
           Text {
             id: heroIcon
-            text: root.gpuHotter ? "󰢮" : "\uf2db"
+            text: root.driverIcon
             color: root.bar ? root.bar.foreground : Color.foreground
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.display
@@ -181,7 +187,7 @@ Panel {
             }
 
             Text {
-              text: (root.gpuHotter ? "GPU" : "CPU") + " · drives the fan"
+              text: root.driverName + " · drives the fan"
               color: root.bar ? root.bar.foreground : Color.foreground
               opacity: 0.6
               font.family: root.bar ? root.bar.fontFamily : Style.font.family

@@ -1,5 +1,5 @@
 [Unit]
-Description=iMac fan control from max(CPU, GPU) temperature
+Description=iMac fan control from every temperature sensor
 Conflicts=mbpfan.service
 After=multi-user.target
 

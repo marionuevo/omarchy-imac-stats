@@ -9,7 +9,7 @@ Built for an iMac15,1 (Retina 5K, late 2014: i5-4690, Radeon R9 M290X/M295X) and
 
 ## Why a daemon
 
-`mbpfan` only reads `coretemp`. A GPU-only load (a game, `glmark2`) heats the Radeon while the fan sits at its 1200 rpm floor. `imac-fand` takes **max(CPU, GPU)** every second and sets the SMC fan target from that.
+`mbpfan` only reads `coretemp`. A GPU-only load (a game, `glmark2`) heats the Radeon while the fan sits at its 1200 rpm floor. CPU and GPU are not enough either: streaming a full-screen 4K picture at 60 fps kept both near 60°C and the fan near its floor while the memory (SMC probe `TM1a`) kept climbing, until the SMC powered the iMac off. Every second `imac-fand` reads `coretemp`, `amdgpu` and all of the SMC's own probes, puts each on the curve for its kind of sensor, and sets the SMC fan target from whichever asks for the most.
 
 It runs as a root systemd service, separate from the shell: if the bar or the whole desktop dies, the fan keeps being regulated. When the daemon stops, it hands the fan back to the SMC's automatic control (`fan1_manual = 0`, or `pwm1_enable = 2` on newer kernels); the unit's `ExecStopPost` does the same if the process is killed outright.
 
@@ -29,13 +29,16 @@ The fan is found through `/sys/devices/platform/applesmc.*`. Up to kernel 7.2.5 
 
 ## Fan modes
 
-| Mode | Leaves 1200 rpm floor | Reaches 2700 rpm |
-|------|-----------------------|------------------|
-| **Silent** | 68°C | 90°C |
-| **Normal** | 60°C | 85°C |
-| **Full** | always max | |
+Curves in **normal** mode, as the temperature where the fan leaves its 1200 rpm floor and where it reaches max (~2700 rpm):
 
-The curve applies to the hotter of CPU and GPU. In every mode, 90°C or more means full speed, and so does losing both sensors. The Radeon idles around 55°C, so both knees sit above that. Ramp is up to +400 rpm per second, down at −40 rpm per second, so bursty loads don't make the fan hunt.
+| Sensors | SMC keys | Floor until | Max at |
+|---------|----------|-------------|--------|
+| CPU | `coretemp` package, `TC*` | 60°C | 85°C |
+| GPU | `amdgpu` edge, `TG*` | 60°C | 85°C |
+| Memory | `TM*`, `Tm*` | 50°C | 72°C |
+| Board (PCH, power supply, SSD, LCD, air) | the rest | 60°C | 80°C |
+
+**Silent** moves every curve up by 8°C at the floor and 5°C at the max; **full** is always max. In every mode, CPU or GPU at 90°C or more means full speed, and so does losing every sensor. Probes that read below 20°C or from 127°C up (absent or broken: the SMC reports them as −127, 0, 1…) are ignored. The Radeon idles around 55°C, so its knee sits above that; the memory idles near 48°C and reached 68°C with the fan at full speed under the 4K stream. The panel shows which sensor is driving the fan. Ramp is up to +400 rpm per second, down at −40 rpm per second, so bursty loads don't make the fan hunt.
 
 The mode lives in `/var/lib/imac-fan/mode`, the only file the desktop user may write; the daemon treats anything that isn't a known mode as `normal`. It survives reboots. The daemon publishes what it is doing in `/run/imac-fan/status.json`, which the widget reads.
 

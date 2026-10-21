@@ -135,6 +135,8 @@ print(json.dumps({
     "fanMin": daemon.get("min") if daemon else None,
     "fanMax": daemon.get("max") if daemon else None,
     "source": daemon.get("source") if daemon else None,
+    "sensor": daemon.get("sensor") if daemon else None,
+    "hottest": daemon.get("hottest") if daemon else None,
     "daemon": daemon is not None,
     "cpuTemp": cpu_temp,
     "gpuTemp": gpu_temp,
