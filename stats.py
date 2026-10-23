@@ -156,6 +156,9 @@ print(json.dumps({
     "sensor": daemon.get("sensor") if daemon else None,
     "hottest": daemon.get("hottest") if daemon else None,
     "daemon": daemon is not None,
+    # RAM power and its cap (W), from the daemon: RAPL energy is root-only.
+    "ramWatts": daemon.get("ramWatts") if daemon else None,
+    "ramCap": daemon.get("ramCap") if daemon else None,
     "cpuTemp": cpu_temp,
     "gpuTemp": gpu_temp,
     "memTemp": mem_temp,

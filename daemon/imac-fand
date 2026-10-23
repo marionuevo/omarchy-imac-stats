@@ -14,6 +14,11 @@ the whole desktop dies, the fan keeps being regulated. On exit the fan is
 handed back to the SMC's own automatic control, and the unit's
 ExecStopPost does the same in case this process is killed outright.
 
+The fan alone can't hold the memory: under a full-bandwidth load TM1a
+reached 90°C with the fan already at max. So from MEM_CAP_START the daemon
+also caps the RAM's power through its RAPL "dram" domain, tighter as it
+gets hotter, and lifts the cap once it has cooled down.
+
 The mode (silent / normal / full) comes from a one-word file the desktop
 user may write; anything that is not a known mode reads as "normal".
 """
@@ -52,6 +57,19 @@ PLAUSIBLE = (20, 127)
 # Whatever the mode, this hot means full speed. The i5-4690 throttles at
 # 100°C and the GPU's own crit is 120°C; 90°C is well short of either.
 PANIC_TEMP = 90
+
+# RAM power cap. The CPU slows itself down when it overheats; the memory has
+# nothing but the SMC cutting the power. Its RAPL "dram" domain does take a
+# limit, and the memory controller throttles to it: asked for 3 W under
+# `stress-ng --stream` it held ~6 W (down from 8.5 W, half the bandwidth) and
+# TM1a climbed at half the rate. It never goes below ~6 W, whatever is asked.
+MEM_SENSOR = "TM1a"
+MEM_CAP_START = 78    # cap from here...
+MEM_CAP_FULL = 84     # ...at its tightest from here
+MEM_CAP_RELEASE = 74  # and lift it below this
+MEM_CAP_W = (7.0, 3.0)  # the cap at MEM_CAP_START and at MEM_CAP_FULL
+MEM_CAP_STEP_W = 0.5    # not worth a RAPL write for less
+MEM_CAP_WINDOW_US = 1000000
 
 # Ramp limits per tick. Up is fast so a load spike is met within a couple of
 # seconds; down is slow so the fan doesn't hunt on bursty loads.
@@ -197,6 +215,62 @@ def curve_target(found, mode, lo, hi):
     return lo + (hi - lo) * demand(driver[2], driver[1], mode), driver
 
 
+def rapl_domain(name):
+    for f in glob.glob("/sys/class/powercap/intel-rapl:*/name"):
+        try:
+            if open(f).read().strip() == name:
+                return os.path.dirname(f)
+        except OSError:
+            pass
+    return None
+
+
+class RamCap:
+    """Caps the RAM's power by TM1a, with hysteresis; measures it as well."""
+
+    def __init__(self):
+        self.base = rapl_domain("dram")
+        self.cap = None  # watts while capped
+        self.energy = None
+        # The firmware leaves the domain uncapped. A cap still on now was left
+        # by a daemon that was killed outright: lift it.
+        if self.base:
+            write_int(os.path.join(self.base, "enabled"), 0)
+
+    def watts(self):
+        """RAM power since the last call, from the domain's energy counter."""
+        if not self.base:
+            return None
+        sample = (read_int(os.path.join(self.base, "energy_uj")), time.monotonic())
+        last, self.energy = self.energy, sample
+        if sample[0] is None or last is None or last[0] is None or sample[0] < last[0]:  # wrapped
+            return None
+        return round((sample[0] - last[0]) / 1e6 / (sample[1] - last[1]), 2)
+
+    def update(self, temp):
+        if not self.base or temp is None:
+            return
+        if temp < MEM_CAP_RELEASE or (self.cap is None and temp < MEM_CAP_START):
+            self.release()
+            return
+        span = (min(max(temp, MEM_CAP_START), MEM_CAP_FULL) - MEM_CAP_START) / (MEM_CAP_FULL - MEM_CAP_START)
+        want = MEM_CAP_W[0] + (MEM_CAP_W[1] - MEM_CAP_W[0]) * span
+        want = round(want / MEM_CAP_STEP_W) * MEM_CAP_STEP_W
+        # Only ever tighter while hot; loosened again once released.
+        if self.cap is not None and want >= self.cap:
+            return
+        write_int(os.path.join(self.base, "constraint_0_power_limit_uw"), want * 1e6)
+        write_int(os.path.join(self.base, "constraint_0_time_window_us"), MEM_CAP_WINDOW_US)
+        if write_int(os.path.join(self.base, "enabled"), 1):
+            self.cap = want
+
+    def release(self):
+        if self.cap is None:
+            return
+        write_int(os.path.join(self.base, "enabled"), 0)
+        self.cap = None
+
+
 def write_status(status):
     try:
         os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
@@ -225,9 +299,11 @@ def main():
     lo = read_int(os.path.join(smc, "fan1_min")) or 1200
     hi = read_int(os.path.join(smc, "fan1_max")) or 2700
     probes = smc_probes(smc)
+    ram = RamCap()
 
     def stop(signum, frame):
         release(fan)
+        ram.release()
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, stop)
@@ -244,6 +320,7 @@ def main():
             found = readings(smc, probes)
             temps = {n: t for n, _, t in found}
             want, driver = curve_target(found, mode, lo, hi)
+            ram.update(temps.get(MEM_SENSOR))
             if want > current:
                 step = min(want, current + RAMP_UP_RPM)
             else:
@@ -270,6 +347,9 @@ def main():
                 "source": driver[1] if driver else None,
                 "hottest": driver[2] if driver else None,
                 "target": current,
+                # RAM power (W) and its cap while TM1a is too hot, else null.
+                "ramWatts": ram.watts(),
+                "ramCap": ram.cap,
                 "rpm": read_int(os.path.join(smc, "fan1_input")),
                 "min": lo,
                 "max": hi,
@@ -278,6 +358,7 @@ def main():
             time.sleep(INTERVAL)
     finally:
         release(fan)
+        ram.release()
 
 
 if __name__ == "__main__":

@@ -356,6 +356,15 @@ Panel {
           InfoPair { label: "CPU";    value: root.fmt(root.stats.cpuTemp, "°C"); driving: root.driverKey === "cpu" }
           InfoPair { label: "GPU";    value: root.fmt(root.stats.gpuTemp, "°C"); driving: root.driverKey === "gpu" }
           InfoPair { label: "Memory (TM1a)"; value: root.fmt(root.stats.memTemp, "°C"); driving: root.driverKey === "TM1a" }
+          // imac-fand caps the RAM's power while TM1a is too hot.
+          InfoPair {
+            visible: root.stats.ramWatts != null
+            label: root.stats.ramCap != null ? "RAM power · capped" : "RAM power"
+            value: root.stats.ramWatts != null
+              ? root.stats.ramWatts.toFixed(1) + " W" + (root.stats.ramCap != null ? " / " + root.stats.ramCap.toFixed(1) + " W" : "")
+              : "--"
+            alert: root.stats.ramCap != null
+          }
           // Another SMC probe (TM2d, a board sensor...) has taken over.
           InfoPair {
             visible: root.driverKey !== "" && !root.driverListed
@@ -600,8 +609,9 @@ Panel {
     property string label: ""
     property string value: ""
     property bool driving: false
+    property bool alert: false
     readonly property real pad: Style.space(3)
-    readonly property color ink: driving ? Color.accent : (root.bar ? root.bar.foreground : Color.foreground)
+    readonly property color ink: alert ? Color.urgent : driving ? Color.accent : (root.bar ? root.bar.foreground : Color.foreground)
     width: parent ? parent.width : 0
     implicitHeight: pairValue.implicitHeight + 2 * pad
 
@@ -618,7 +628,7 @@ Panel {
       anchors.verticalCenter: parent.verticalCenter
       text: (pair.driving ? "󰈐 " : "") + pair.label
       color: pair.ink
-      opacity: pair.driving ? 1.0 : 0.6
+      opacity: pair.driving || pair.alert ? 1.0 : 0.6
       font.family: root.bar ? root.bar.fontFamily : Style.font.family
       font.pixelSize: Style.font.bodySmall
     }

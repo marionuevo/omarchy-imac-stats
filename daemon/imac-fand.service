@@ -10,6 +10,8 @@ ExecStart=/usr/local/bin/imac-fand
 # hand the fan back to the SMC's automatic control. Old applesmc names first
 # (kernel <= 7.2.5), then the hwmon ones; see smc_fan() in imac-fand.
 ExecStopPost=/bin/sh -c 'for f in /sys/devices/platform/applesmc.*/fan1_manual; do [ -e "$f" ] && echo 0 > "$f"; done; for f in /sys/devices/platform/applesmc.*/hwmon/hwmon*/pwm1_enable; do [ -e "$f" ] && echo 2 > "$f"; done; true'
+# Same for the RAM power cap (RamCap in imac-fand): lift it.
+ExecStopPost=/bin/sh -c 'for d in /sys/class/powercap/intel-rapl:*; do [ "$(cat "$d/name" 2>/dev/null)" = dram ] && echo 0 > "$d/enabled"; done; true'
 Restart=always
 RestartSec=2
 RuntimeDirectory=imac-fan

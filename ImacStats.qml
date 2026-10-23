@@ -42,7 +42,7 @@ BarWidget {
             ["/" + fmt(stats.cpu, "%") + "  ", false],
             ["󰢮 " + fmt(stats.gpuTemp, "°C"), driverKey === "gpu"],
             ["/" + fmt(stats.gpu, "%") + "  ", false],
-            [" " + fmt(stats.memTemp, "°C"), driverKey === "TM1a"],
+            [" " + fmt(stats.memTemp, "°C") + (stats.ramCap != null ? "!" : ""), driverKey === "TM1a"],
             ["/" + fmt(stats.ram, "%") + "  ", false],
             ["󰋊 " + fmt(stats.disk, "%"), false]
         ]
