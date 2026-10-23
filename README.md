@@ -5,6 +5,8 @@
 
 A minimal `bar-widget` plugin for the [Omarchy](https://omarchy.org/) shell (Quickshell) on an Intel iMac, plus a small fan daemon. Shows fan RPM, CPU/GPU temp and usage, memory temp and RAM usage, and disk usage as a static row of icon+value pairs. Clicking opens a fan mode picker, with the reading that drives the fan highlighted and a chart of the last two minutes of CPU, GPU and memory temps.
 
+![The bar and the panel: the GPU drives the fan, and a chart of the last two minutes of CPU, GPU and memory temps](docs/screenshot.png)
+
 Built for an iMac15,1 (Retina 5K, late 2014: i5-4690, Radeon R9 M290X/M295X) and adapted from [omarchy-minimal-liquid-stats](https://github.com/marionuevo/omarchy-minimal-liquid-stats).
 
 ## Why a daemon
