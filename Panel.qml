@@ -350,20 +350,133 @@ Panel {
         Column {
           width: parent.width
 
-          InfoPair { label: "Fan";    value: root.fmt(root.stats.fan, " rpm") }
-          InfoPair { label: "Target"; value: root.fmt(root.stats.fanTarget, " rpm") }
-          InfoPair { label: "Range";  value: root.stats.fanMin != null ? (root.stats.fanMin + "–" + root.stats.fanMax + " rpm") : "--" }
+          // Fan gauge: the track is the fan's range, the fill its real rpm and
+          // the tick the daemon's target, so a fan still ramping shows a gap.
+          Item {
+            id: fanGauge
+            width: parent.width
+            implicitHeight: fanHead.implicitHeight + Style.space(6) + track.height + Style.space(4) + fanEnds.implicitHeight + 2 * Style.space(3)
+
+            readonly property real lo: root.stats.fanMin != null ? root.stats.fanMin : 1200
+            readonly property real hi: root.stats.fanMax != null ? root.stats.fanMax : 2700
+            function frac(rpm) {
+              return rpm == null || hi <= lo ? 0 : Math.max(0, Math.min(1, (rpm - lo) / (hi - lo)))
+            }
+
+            Item {
+              id: fanHead
+              x: Style.space(6)
+              y: Style.space(3)
+              width: parent.width - 2 * Style.space(6)
+              implicitHeight: fanValue.implicitHeight
+
+              Text {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Fan"
+                color: root.bar ? root.bar.foreground : Color.foreground
+                opacity: 0.6
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
+
+              // The target in the tick's color doubles as its legend.
+              Row {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(8)
+
+                Text {
+                  id: fanValue
+                  text: root.fmt(root.stats.fan, " rpm")
+                  color: root.bar ? root.bar.foreground : Color.foreground
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.bodySmall
+                }
+
+                Text {
+                  visible: root.stats.fanTarget != null
+                  text: "target " + root.stats.fanTarget
+                  color: Color.accent
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.bodySmall
+                }
+              }
+            }
+
+            Rectangle {
+              id: track
+              x: Style.space(6)
+              anchors.top: fanHead.bottom
+              anchors.topMargin: Style.space(6)
+              width: parent.width - 2 * Style.space(6)
+              height: Style.space(8)
+              radius: height / 2
+              color: Util.alpha(root.bar ? root.bar.foreground : Color.foreground, 0.1)
+
+              Rectangle {
+                width: Math.max(parent.height, parent.width * fanGauge.frac(root.stats.fan))
+                height: parent.height
+                radius: parent.radius
+                visible: root.stats.fan != null
+                color: Util.alpha(root.bar ? root.bar.foreground : Color.foreground, 0.55)
+                Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+              }
+
+              // Target tick, taller than the track, with a surface ring.
+              Rectangle {
+                visible: root.stats.fanTarget != null
+                x: Math.round(parent.width * fanGauge.frac(root.stats.fanTarget) - width / 2)
+                anchors.verticalCenter: parent.verticalCenter
+                width: Style.space(3)
+                height: parent.height + Style.space(6)
+                radius: width / 2
+                color: Color.accent
+                border.width: 1
+                border.color: Color.popups.background
+                Behavior on x { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+              }
+            }
+
+            Item {
+              id: fanEnds
+              x: Style.space(6)
+              anchors.top: track.bottom
+              anchors.topMargin: Style.space(4)
+              width: parent.width - 2 * Style.space(6)
+              implicitHeight: fanMinText.implicitHeight
+
+              Text {
+                id: fanMinText
+                anchors.left: parent.left
+                text: root.fmt(root.stats.fanMin, "")
+                color: root.bar ? root.bar.foreground : Color.foreground
+                opacity: 0.45
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.caption
+              }
+
+              Text {
+                anchors.right: parent.right
+                text: root.fmt(root.stats.fanMax, " rpm")
+                color: root.bar ? root.bar.foreground : Color.foreground
+                opacity: 0.45
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.caption
+              }
+            }
+          }
           InfoPair { label: "CPU";    value: root.fmt(root.stats.cpuTemp, "°C"); driving: root.driverKey === "cpu" }
           InfoPair { label: "GPU";    value: root.fmt(root.stats.gpuTemp, "°C"); driving: root.driverKey === "gpu" }
           InfoPair { label: "Memory (TM1a)"; value: root.fmt(root.stats.memTemp, "°C"); driving: root.driverKey === "TM1a" }
-          // imac-fand caps the RAM's power while TM1a is too hot.
+          // Only while imac-fand caps the RAM's power (TM1a too hot); its
+          // power the rest of the time is the power widget's to show.
           InfoPair {
-            visible: root.stats.ramWatts != null
-            label: root.stats.ramCap != null ? "RAM power · capped" : "RAM power"
-            value: root.stats.ramWatts != null
-              ? root.stats.ramWatts.toFixed(1) + " W" + (root.stats.ramCap != null ? " / " + root.stats.ramCap.toFixed(1) + " W" : "")
-              : "--"
-            alert: root.stats.ramCap != null
+            visible: root.stats.ramCap != null
+            label: "RAM power · capped"
+            value: (root.stats.ramWatts != null ? root.stats.ramWatts.toFixed(1) + " W / " : "") +
+              (root.stats.ramCap != null ? root.stats.ramCap.toFixed(1) + " W" : "")
+            alert: true
           }
           // Another SMC probe (TM2d, a board sensor...) has taken over.
           InfoPair {
