@@ -13,6 +13,22 @@ Built for an iMac15,1 (Retina 5K, late 2014: i5-4690, Radeon R9 M290X/M295X) and
 
 It runs as a root systemd service, separate from the shell: if the bar or the whole desktop dies, the fan keeps being regulated. When the daemon stops, it hands the fan back to the SMC's automatic control (`fan1_manual = 0`, or `pwm1_enable = 2` on newer kernels); the unit's `ExecStopPost` does the same if the process is killed outright.
 
+## Memory: TM1a and a RAM power cap
+
+`TM1a` is the system RAM (the SO-DIMMs or their regulator), found by loading one thing at a time on an iMac15,1:
+
+| Load | TM1a | CPU | GPU |
+|---|---|---|---|
+| RAM, `stress-ng --stream 4`, 90 s | 51.5 → **90.5°C** | +5 | — |
+| CPU, `stress-ng --cpu 4`, 4 min | +2 | 46 → 54.5°C | — |
+| VRAM, `memtest_vulkan`, 4.5 min | none | — | +28 (TG0E/TG0F) |
+
+It answers to memory bandwidth, not to CPU work, and it moves fast (−30°C two minutes after the load stops). DDR3 is in spec up to 85°C. Real loads that get there redraw the 5K panel nonstop: Omarchy's screensaver in Foot, which draws on the CPU, took the RAM from 2.3 W to 6.2 W and TM1a from 58 to 77°C in a minute with the fan at full speed. The same screensaver in Alacritty, which draws on the GPU, left the RAM at 2.5 W and TM1a at 58°C: on this iMac, use a GPU terminal.
+
+The SMC does not protect the RAM by itself. It reads its probes, runs the fan on its own curve when nobody else does, and as a last resort powers the iMac off. Under macOS the operating system does the fine thermal management on Intel Macs; under Linux `applesmc` only exposes the probes and the fan. The memory controller's own thermal throttling needs a sensor on the module, and these SO-DIMMs have none: `TM1a` is a board thermistor only the SMC can see.
+
+So `imac-fand` caps the RAM itself through the RAPL `dram` domain: from 78°C it lowers the limit from 7 W towards 3 W (reached at 84°C), and it releases the limit below 74°C. The i5-4690 honours it by slowing the memory, but never goes below ~6 W under `stress-ng`, whatever the limit, and a slower CPU does not help (7.8 W of RAM at 800 MHz). With the cap, `stress-ng --stream` reached 82°C at 90 s instead of 90.5°C. The daemon publishes the RAM's power (`ramWatts`) and the active cap (`ramCap`), since only root can read RAPL energy. The panel shows a "RAM power · capped" row while the cap is on, and the bar marks the memory reading with `!`.
+
 ## Sensors
 
 | Icon | Value | Source |
