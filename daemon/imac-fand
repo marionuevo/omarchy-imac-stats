@@ -208,8 +208,10 @@ def curve_target(found, mode, lo, hi):
     # No sensor at all means flying blind: run at max rather than min.
     if not found:
         return hi, None
-    # The sensor asking for the most; at rest, the hottest of CPU and GPU.
-    driver = max(found, key=lambda r: (demand(r[2], r[1], mode), r[1] in ("cpu", "gpu"), r[2]))
+    # The sensor asking for the most; at rest, the hottest of CPU and GPU. By
+    # name, not kind: the SMC's own core probes (TC1c, TCXc...) idle a few
+    # degrees off the package reading and took turns with it in the bar.
+    driver = max(found, key=lambda r: (demand(r[2], r[1], mode), r[0] in ("cpu", "gpu"), r[2]))
     if mode == "full":
         return hi, driver
     return lo + (hi - lo) * demand(driver[2], driver[1], mode), driver

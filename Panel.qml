@@ -91,7 +91,9 @@ Panel {
 
   // The key of the reading imac-fand follows ("cpu", "gpu" or an SMC key such
   // as TM1a); empty without the daemon, when nothing in here drives the fan.
-  readonly property string driverKey: stats.daemon === true && stats.sensor ? String(stats.sensor) : ""
+  // An SMC CPU or GPU probe (TC1c, TG0D...) counts as the CPU or GPU reading.
+  readonly property string driverKey: stats.daemon !== true || !stats.sensor ? "" :
+    (stats.source === "cpu" || stats.source === "gpu") ? String(stats.source) : String(stats.sensor)
   readonly property bool driverListed: ["cpu", "gpu", "TM1a"].indexOf(driverKey) >= 0
 
   // ---- Chart: one shared °C scale, one line per sensor. Line colors come

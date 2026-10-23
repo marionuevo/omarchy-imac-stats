@@ -26,8 +26,10 @@ BarWidget {
     }
 
     // The reading imac-fand follows ("cpu", "gpu" or an SMC key such as
-    // TM1a); empty without the daemon, when nothing here drives the fan.
-    readonly property string driverKey: stats.daemon === true && stats.sensor ? String(stats.sensor) : ""
+    // TM1a); empty without the daemon, when nothing here drives the fan. An
+    // SMC CPU or GPU probe (TC1c, TG0D...) counts as the CPU or GPU reading.
+    readonly property string driverKey: stats.daemon !== true || !stats.sensor ? "" :
+        (stats.source === "cpu" || stats.source === "gpu") ? String(stats.source) : String(stats.sensor)
 
     // The label as [text, drives the fan] pieces. Another SMC probe in charge
     // (TM2d, a board sensor...) is shown next to the rpm, already marked.
