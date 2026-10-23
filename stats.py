@@ -21,7 +21,10 @@ def hwmon_chip(name):
 
 
 def temp_by_label(chip_name, label):
-    base = hwmon_chip(chip_name)
+    return temp_in(hwmon_chip(chip_name), label)
+
+
+def temp_in(base, label):
     if not base:
         return None
     for f in glob.glob(base + "/temp*_label"):
@@ -35,6 +38,18 @@ def temp_by_label(chip_name, label):
             return round(int(open(base + "/temp" + idx + "_input").read().strip()) / 1000)
         except OSError:
             return None
+    return None
+
+
+def smc_temp(label):
+    # The SMC's probes keep their key (TM1a, TG0D...) as label. Up to kernel
+    # 7.2.5 they sat on the platform device with no hwmon name file; since
+    # 7.2.8 under hwmon/hwmon*. Try both, like fan_rpm.
+    for base in (glob.glob("/sys/devices/platform/applesmc.*")
+                 + glob.glob("/sys/devices/platform/applesmc.*/hwmon/hwmon*")):
+        t = temp_in(base, label)
+        if t is not None:
+            return t
     return None
 
 
@@ -122,6 +137,9 @@ def disk_usage():
 gpu_proc = start_gpu_usage()
 cpu_temp = temp_by_label("coretemp", "Package id 0")
 gpu_temp = temp_by_label("amdgpu", "edge")
+# TM1a follows the system RAM (the SO-DIMMs or their regulator): it is what
+# heats up when the 5K picture is redrawn nonstop, while CPU and GPU stay cool.
+mem_temp = smc_temp("TM1a")
 cpu_pct = cpu_usage()
 ram_pct = mem_usage()
 disk_pct = disk_usage()
@@ -140,6 +158,7 @@ print(json.dumps({
     "daemon": daemon is not None,
     "cpuTemp": cpu_temp,
     "gpuTemp": gpu_temp,
+    "memTemp": mem_temp,
     "cpu": cpu_pct,
     "gpu": gpu_pct,
     "ram": ram_pct,

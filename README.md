@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Omarchy](https://img.shields.io/badge/omarchy-shell%20plugin-1793d1)](https://omarchy.org)
 
-A minimal `bar-widget` plugin for the [Omarchy](https://omarchy.org/) shell (Quickshell) on an Intel iMac, plus a small fan daemon. Shows fan RPM, CPU/GPU temp and usage, RAM and disk usage as a static row of icon+value pairs. Clicking opens a fan mode picker.
+A minimal `bar-widget` plugin for the [Omarchy](https://omarchy.org/) shell (Quickshell) on an Intel iMac, plus a small fan daemon. Shows fan RPM, CPU/GPU temp and usage, memory temp and RAM usage, and disk usage as a static row of icon+value pairs. Clicking opens a fan mode picker, with the reading that drives the fan highlighted and a chart of the last two minutes of CPU, GPU and memory temps.
 
 Built for an iMac15,1 (Retina 5K, late 2014: i5-4690, Radeon R9 M290X/M295X) and adapted from [omarchy-minimal-liquid-stats](https://github.com/marionuevo/omarchy-minimal-liquid-stats).
 
@@ -20,7 +20,7 @@ It runs as a root systemd service, separate from the shell: if the bar or the wh
 | 󰈐 fan | Fan RPM (`!` when the daemon is down) | `applesmc` `fan1_input` |
 |  CPU | CPU temp / usage % | `coretemp` "Package id 0", `/proc/stat` |
 | 󰢮 GPU | GPU temp / usage % | `amdgpu` "edge" (SMC `TG0D` as daemon fallback), `radeontop` |
-| 󰍛 memory | RAM usage % | `/proc/meminfo` |
+|  memory | Memory temp / RAM usage % | SMC `TM1a`, `/proc/meminfo` |
 | 󰋊 disk | `/` usage % | `shutil.disk_usage` |
 
 `gpu_busy_percent` is not implemented for this Southern Islands Radeon, so GPU usage comes from a one-second `radeontop` sample that overlaps the CPU sample.
@@ -35,7 +35,7 @@ Curves in **normal** mode, as the temperature where the fan leaves its 1200 rpm 
 |---------|----------|-------------|--------|
 | CPU | `coretemp` package, `TC*` | 60°C | 85°C |
 | GPU | `amdgpu` edge, `TG*` | 60°C | 85°C |
-| Memory | `TM*`, `Tm*` | 50°C | 72°C |
+| Memory | `TM*`, `Tm*` | 58°C | 72°C |
 | Board (PCH, power supply, SSD, LCD, air) | the rest | 60°C | 80°C |
 
 **Silent** moves every curve up by 8°C at the floor and 5°C at the max; **full** is always max. In every mode, CPU or GPU at 90°C or more means full speed, and so does losing every sensor. Probes that read below 20°C or from 127°C up (absent or broken: the SMC reports them as −127, 0, 1…) are ignored. The Radeon idles around 55°C, so its knee sits above that; the memory idles near 48°C and reached 68°C with the fan at full speed under the 4K stream. The panel shows which sensor is driving the fan. Ramp is up to +400 rpm per second, down at −40 rpm per second, so bursty loads don't make the fan hunt.
