@@ -21,8 +21,15 @@ BarWidget {
 
     readonly property int historySeconds: 120
 
-    function fmt(value, unit) {
-        return (value === undefined || value === null) ? ("--" + unit) : (value + unit)
+    // Padded to `width` characters: the bar font is monospaced, so every
+    // reading keeps its width and the widgets to the right don't shift as
+    // numbers change.
+    // `after` pads behind the unit, so a usage stays next to its "/".
+    function fmt(value, unit, width, after) {
+        var v = (value === undefined || value === null) ? "--" : String(value)
+        var pad = ""
+        while (v.length + pad.length < (width || 0)) pad += " "
+        return after ? v + unit + pad : pad + v + unit
     }
 
     // The reading imac-fand follows ("cpu", "gpu" or an SMC key such as
@@ -36,34 +43,25 @@ BarWidget {
     readonly property var pieces: {
         var other = driverKey !== "" && ["cpu", "gpu", "TM1a"].indexOf(driverKey) < 0
         var hottest = stats.hottest != null ? Math.round(stats.hottest) : null
+        // rpm 1200-2900; temperatures stay under 100°C (full fan from 90);
+        // usage reaches 100%; the disk is far from full.
         return [
-            ["󰈐 " + fmt(stats.fan, "") + (stats.daemon === false ? "!" : ""), false],
-            [other ? " " + driverKey + " " + fmt(hottest, "°C") : "", other],
-            ["  ", false],
-            [" " + fmt(stats.cpuTemp, "°C"), driverKey === "cpu"],
-            ["/" + fmt(stats.cpu, "%") + "  ", false],
-            ["󰢮 " + fmt(stats.gpuTemp, "°C"), driverKey === "gpu"],
-            ["/" + fmt(stats.gpu, "%") + "  ", false],
-            [" " + fmt(stats.memTemp, "°C") + (stats.ramCap != null ? "!" : ""), driverKey === "TM1a"],
-            ["/" + fmt(stats.ram, "%") + "  ", false],
-            ["󰋊 " + fmt(stats.disk, "%"), false]
+            ["󰈐 " + fmt(stats.fan, "", 4) + (stats.daemon === false ? "!" : ""), false],
+            [other ? " " + driverKey + " " + fmt(hottest, "°C", 2) : "", other],
+            [" ", false],
+            [" " + fmt(stats.cpuTemp, "°C", 2), driverKey === "cpu"],
+            ["/" + fmt(stats.cpu, "%", 3, true) + " ", false],
+            ["󰢮 " + fmt(stats.gpuTemp, "°C", 2), driverKey === "gpu"],
+            ["/" + fmt(stats.gpu, "%", 3, true) + " ", false],
+            [" " + fmt(stats.memTemp, "°C", 2) + (stats.ramCap != null ? "!" : ""), driverKey === "TM1a"],
+            ["/" + fmt(stats.ram, "%", 3, true) + " ", false],
+            ["󰋊 " + fmt(stats.disk, "%", 2), false]
         ]
     }
 
     readonly property string displayText: {
         var out = ""
         for (var i = 0; i < pieces.length; i++) out += pieces[i][0]
-        return out
-    }
-
-    // WidgetButton's own label is plain text; this one colors the reading
-    // that drives the fan. Same glyphs and font, so the same width.
-    readonly property string styledText: {
-        var out = ""
-        for (var i = 0; i < pieces.length; i++) {
-            var t = pieces[i][0].replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-            out += pieces[i][1] ? "<font color=\"" + Color.accent + "\">" + t + "</font>" : t
-        }
         return out
     }
 
@@ -148,17 +146,27 @@ BarWidget {
         labelVisible: false
         horizontalMargin: 8.5
 
-        Text {
+        // WidgetButton's own label is one plain text; this one colors the
+        // reading that drives the fan. One plain Text per piece rather than
+        // StyledText, which collapses runs of spaces and so would undo the
+        // padding. Same glyphs and font, so the same width.
+        Row {
             id: styledLabel
             anchors.centerIn: parent
-            textFormat: Text.StyledText
-            text: root.styledText
-            color: button.foreground
-            font.family: button.fontFamily
-            font.pixelSize: button.fontSize
-            renderType: Text.NativeRendering
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
+
+            Repeater {
+                model: root.pieces
+
+                Text {
+                    required property var modelData
+                    text: modelData[0]
+                    color: modelData[1] ? Color.accent : button.foreground
+                    font.family: button.fontFamily
+                    font.pixelSize: button.fontSize
+                    renderType: Text.NativeRendering
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
         }
 
         onPressed: function(b) {
