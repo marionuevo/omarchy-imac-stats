@@ -130,28 +130,26 @@ BarWidget {
         if ("history" in target) target.history = root.history
     }
 
-    implicitWidth: spacer.width + button.implicitWidth
+    implicitWidth: button.anchors.leftMargin + button.implicitWidth
     implicitHeight: button.implicitHeight
 
     onBarChanged: injectPanel()
     onSettingsChanged: injectPanel()
 
-    Item {
-        id: spacer
-        width: Style.space(12)
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-    }
-
     WidgetButton {
         id: button
-        anchors.left: spacer.right
+        anchors.left: parent.left
+        // No gap of its own before the label: marionuevo.separator sets the
+        // space between widgets. The margins are tuned so the separator
+        // lines on either side sit centered: 6 rather than 8.5 because the
+        // "%" glyph carries some bearing, and 2.5 more on the left because
+        // the fan glyph carries less.
+        anchors.leftMargin: 2.5
         anchors.verticalCenter: parent.verticalCenter
         bar: root.bar
         text: root.displayText
         labelVisible: false
-        horizontalMargin: 8.5
+        horizontalMargin: 6
 
         // WidgetButton's own label is one plain text; this one colors the
         // reading that drives the fan. One plain Text per piece rather than
