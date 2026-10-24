@@ -273,12 +273,17 @@ class RamCap:
         self.cap = None
 
 
-# GPU power. amdgpu exposes no power reading for this Southern Islands
-# Radeon (its hwmon has a PPT label but no power1_input/average), but the
-# SMC measures the rails itself. PGTR is the GPU's total rail (~34 W showing
-# the 5K desktop); like the rest of the SMC's key space it is only reachable
-# through applesmc's root-only key_at_index files.
+# GPU and whole-iMac power. amdgpu exposes no power reading for this
+# Southern Islands Radeon (its hwmon has a PPT label but no
+# power1_input/average), but the SMC measures the rails itself. PGTR is the
+# GPU's total rail (~34 W showing the 5K desktop, ~8 W with the panel off);
+# PDTR is the power supply's DC output, everything the iMac draws (~81 W at
+# idle: CPU, GPU and RAM plus ~37 W of panel backlight, board, disk and fan).
+# PZ5G looks like a total too but jumps 99-126 W at a steady load: a power
+# budget, not a reading. Like the rest of the SMC's key space these are only
+# reachable through applesmc's root-only key_at_index files.
 GPU_POWER_KEY = "PGTR"
+DC_POWER_KEY = "PDTR"
 
 
 class SmcKey:
@@ -346,6 +351,7 @@ def main():
     probes = smc_probes(smc)
     ram = RamCap()
     gpu_power = SmcKey(GPU_POWER_KEY)
+    dc_power = SmcKey(DC_POWER_KEY)
 
     def stop(signum, frame):
         release(fan)
@@ -398,6 +404,8 @@ def main():
                 "ramCap": ram.cap,
                 # GPU power (W) from the SMC's GPU rail; null if not found.
                 "gpuWatts": gpu_power.watts(),
+                # Whole-iMac power (W): the power supply's DC output.
+                "dcWatts": dc_power.watts(),
                 "rpm": read_int(os.path.join(smc, "fan1_input")),
                 "min": lo,
                 "max": hi,
