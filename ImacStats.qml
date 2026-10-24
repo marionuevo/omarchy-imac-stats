@@ -38,23 +38,30 @@ BarWidget {
     readonly property string driverKey: stats.daemon !== true || !stats.sensor ? "" :
         (stats.source === "cpu" || stats.source === "gpu") ? String(stats.source) : String(stats.sensor)
 
-    // The label as [text, drives the fan] pieces. Another SMC probe in charge
-    // (TM2d, a board sensor...) is shown next to the rpm, already marked.
+    // The label as [text, drives the fan, separator] pieces. Another SMC probe
+    // in charge (TM2d, a board sensor...) is shown next to the rpm, already
+    // marked. Separators are three spaces with a hairline drawn across the
+    // middle one, so the plain text WidgetButton sizes itself by still has
+    // the label's exact width.
     readonly property var pieces: {
         var other = driverKey !== "" && ["cpu", "gpu", "TM1a"].indexOf(driverKey) < 0
         var hottest = stats.hottest != null ? Math.round(stats.hottest) : null
         // rpm 1200-2900; temperatures stay under 100°C (full fan from 90);
         // usage reaches 100%; the disk is far from full.
+        var sep = ["   ", false, true]
         return [
             ["󰈐 " + fmt(stats.fan, "", 4) + (stats.daemon === false ? "!" : ""), false],
             [other ? " " + driverKey + " " + fmt(hottest, "°C", 2) : "", other],
-            [" ", false],
+            sep,
             [" " + fmt(stats.cpuTemp, "°C", 2), driverKey === "cpu"],
-            ["/" + fmt(stats.cpu, "%", 3, true) + " ", false],
+            ["/" + fmt(stats.cpu, "%", 3, true), false],
+            sep,
             ["󰢮 " + fmt(stats.gpuTemp, "°C", 2), driverKey === "gpu"],
-            ["/" + fmt(stats.gpu, "%", 3, true) + " ", false],
+            ["/" + fmt(stats.gpu, "%", 3, true), false],
+            sep,
             [" " + fmt(stats.memTemp, "°C", 2) + (stats.ramCap != null ? "!" : ""), driverKey === "TM1a"],
-            ["/" + fmt(stats.ram, "%", 3, true) + " ", false],
+            ["/" + fmt(stats.ram, "%", 3, true), false],
+            sep,
             ["󰋊 " + fmt(stats.disk, "%", 2), false]
         ]
     }
@@ -165,6 +172,17 @@ BarWidget {
                     font.pixelSize: button.fontSize
                     renderType: Text.NativeRendering
                     verticalAlignment: Text.AlignVCenter
+
+                    // The hairline between readings; marionuevo.separator
+                    // draws a stronger one between widgets.
+                    Rectangle {
+                        visible: modelData[2] === true
+                        anchors.centerIn: parent
+                        width: 1
+                        height: Math.round((root.bar ? root.bar.barSize : Style.bar.sizeHorizontal) * 0.45)
+                        color: button.foreground
+                        opacity: 0.3
+                    }
                 }
             }
         }
