@@ -31,6 +31,12 @@ The SMC does not protect the RAM by itself. It reads its probes, runs the fan on
 
 So `imac-fand` caps the RAM itself through the RAPL `dram` domain: from 78°C it lowers the limit from 7 W towards 3 W (reached at 84°C), and it releases the limit below 74°C. The i5-4690 honours it by slowing the memory, but never goes below ~6 W under `stress-ng`, whatever the limit, and a slower CPU does not help (7.8 W of RAM at 800 MHz). With the cap, `stress-ng --stream` reached 82°C at 90 s instead of 90.5°C. The daemon publishes the RAM's power (`ramWatts`) and the active cap (`ramCap`), since only root can read RAPL energy. The panel shows a "RAM power · capped" row while the cap is on, and the bar marks the memory reading with `!`.
 
+## GPU power from the SMC
+
+`amdgpu` reports no power for this Southern Islands Radeon: its hwmon has a `PPT` label but no `power1_input` or `power1_average`. The SMC measures the power rails itself, though, under keys only root can read through `applesmc`'s `key_at_index` files. `PGTR` is the GPU's total rail, so `imac-fand` publishes it as `gpuWatts` (the other rails seen: `PCTR` the CPU, `PDTR` the whole iMac's DC input). [omarchy-power-widget](https://github.com/marionuevo/omarchy-power-widget) shows it next to the CPU and RAM power.
+
+Showing the 5K desktop at idle the GPU draws ~35 W; with the panel off (DPMS) ~8 W, a few seconds after it goes dark. Most of the idle draw is driving the panel: two DisplayPort links and the GDDR5 held at its top clock (1365 MHz), since a 5K frame at 60 Hz leaves too short a blanking period to switch memory clocks unnoticed.
+
 ## Sensors
 
 | Icon | Value | Source |
