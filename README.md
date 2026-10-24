@@ -3,9 +3,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Omarchy](https://img.shields.io/badge/omarchy-shell%20plugin-1793d1)](https://omarchy.org)
 
-A minimal `bar-widget` plugin for the [Omarchy](https://omarchy.org/) shell (Quickshell) on an Intel iMac, plus a small fan daemon. Shows fan RPM, CPU/GPU temp and usage, memory temp and RAM usage, and disk usage as a static row of icon+value pairs. Clicking opens a fan mode picker, with the reading that drives the fan highlighted and a chart of the last two minutes of CPU, GPU and memory temps.
+A minimal `bar-widget` plugin for the [Omarchy](https://omarchy.org/) shell (Quickshell) on an Intel iMac, plus a small fan daemon. Shows fan RPM, CPU/GPU temp and usage, memory temp and RAM usage, and disk usage. Each reading is an icon and two stacked rows: the temperature (or the fan's rpm) on top, and below a meter whose outline is the whole range and whose fill is the current value (usage, or the rpm within the fan's range). The disk has only its meter. Every reading keeps a fixed width, so the widgets to the right never shift. Clicking opens a fan mode picker, with the reading that drives the fan highlighted and a chart of the last two minutes of CPU, GPU and memory temps.
 
-![The bar and the panel: the GPU drives the fan, and a chart of the last two minutes of CPU, GPU and memory temps](docs/screenshot.png)
+![The bar and the panel: the CPU drives the fan, and a chart of the last two minutes of CPU, GPU and memory temps](docs/screenshot.png)
 
 Built for an iMac15,1 (Retina 5K, late 2014: i5-4690, Radeon R9 M290X/M295X) and adapted from [omarchy-minimal-liquid-stats](https://github.com/marionuevo/omarchy-minimal-liquid-stats).
 
@@ -41,11 +41,11 @@ Showing the 5K desktop at idle the GPU draws ~35 W; with the panel off (DPMS) ~8
 
 | Icon | Value | Source |
 |------|-------|--------|
-| 󰈐 fan | Fan RPM (`!` when the daemon is down) | `applesmc` `fan1_input` |
-|  CPU | CPU temp / usage % | `coretemp` "Package id 0", `/proc/stat` |
-| 󰢮 GPU | GPU temp / usage % | `amdgpu` "edge" (SMC `TG0D` as daemon fallback), `radeontop` |
-|  memory | Memory temp / RAM usage % | SMC `TM1a`, `/proc/meminfo` |
-| 󰋊 disk | `/` usage % | `shutil.disk_usage` |
+| 󰈐 fan | Fan RPM, meter within the fan's min–max (`!` when the daemon is down) | `applesmc` `fan1_input` |
+|  CPU | CPU temp, usage meter | `coretemp` "Package id 0", `/proc/stat` |
+| 󰢮 GPU | GPU temp, usage meter | `amdgpu` "edge" (SMC `TG0D` as daemon fallback), `radeontop` |
+|  memory | Memory temp, RAM usage meter | SMC `TM1a`, `/proc/meminfo` |
+| 󰋊 disk | `/` usage meter | `shutil.disk_usage` |
 
 `gpu_busy_percent` is not implemented for this Southern Islands Radeon, so GPU usage comes from a one-second `radeontop` sample that overlaps the CPU sample.
 
@@ -107,4 +107,4 @@ cat /run/imac-fan/status.json
 - Omarchy running on Hyprland
 - Python 3
 - `applesmc` and `coretemp` (loaded by default on Intel Macs), `amdgpu`
-- `radeontop` for GPU usage (optional; shows `--%` without it)
+- `radeontop` for GPU usage (optional; the GPU meter stays empty without it)
