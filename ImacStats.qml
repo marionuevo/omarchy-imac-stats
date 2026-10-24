@@ -152,6 +152,10 @@ BarWidget {
 
         Column {
             anchors.verticalCenter: parent.verticalCenter
+            // The number's line box has more room below the meter than
+            // above the digits; a pixel down evens the margins to the bar's
+            // edges. A meter alone stays centered.
+            anchors.verticalCenterOffset: reading.value !== "" ? 1 : 0
 
             Text {
                 id: number
