@@ -26,6 +26,11 @@ BarWidget {
     readonly property int historySeconds: 120
 
     readonly property color fg: button.foreground
+    // The theme accent is picked for the bar's own background; over a
+    // wallpaper (transparent bar) it can vanish, so fall back to the
+    // contrast-adjusted foreground and let weight carry the emphasis.
+    readonly property bool overWallpaper: !!(bar && bar.transparent)
+    readonly property color hi: overWallpaper ? fg : Color.accent
     readonly property string fontFamily: button.fontFamily
 
     function fmt(value, unit) {
@@ -163,7 +168,8 @@ BarWidget {
                 width: widest.width
                 horizontalAlignment: Text.AlignRight
                 text: reading.value
-                color: reading.drives ? Color.accent : root.fg
+                color: reading.drives ? root.hi : root.fg
+                font.bold: reading.drives && root.overWallpaper
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
                 renderType: Text.NativeRendering
@@ -172,7 +178,7 @@ BarWidget {
                     visible: reading.flag
                     anchors.left: parent.right
                     text: "!"
-                    color: Color.accent
+                    color: root.hi
                     font: number.font
                     renderType: Text.NativeRendering
                 }
@@ -270,7 +276,8 @@ BarWidget {
                     Text {
                         required property var modelData
                         text: modelData
-                        color: Color.accent
+                        color: root.hi
+                        font.bold: root.overWallpaper
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.caption
                         renderType: Text.NativeRendering
