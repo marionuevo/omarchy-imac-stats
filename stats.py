@@ -139,7 +139,11 @@ cpu_temp = temp_by_label("coretemp", "Package id 0")
 gpu_temp = temp_by_label("amdgpu", "edge")
 # TM1a follows the system RAM (the SO-DIMMs or their regulator): it is what
 # heats up when the 5K picture is redrawn nonstop, while CPU and GPU stay cool.
+# A MacBook Pro has no TM1a; its memory probe is TM0P.
+mem_sensor = "TM1a"
 mem_temp = smc_temp("TM1a")
+if mem_temp is None:
+    mem_sensor, mem_temp = "TM0P", smc_temp("TM0P")
 cpu_pct = cpu_usage()
 ram_pct = mem_usage()
 disk_pct = disk_usage()
@@ -149,6 +153,10 @@ daemon = fan_status()
 
 print(json.dumps({
     "fan": fan,
+    # Every fan as imac-fand reports it (label, rpm, target, min, max);
+    # [] without the daemon, which leaves the single-fan fields above.
+    "fans": daemon.get("fans", []) if daemon else [],
+    "memSensor": mem_sensor if mem_temp is not None else None,
     "fanTarget": daemon.get("target") if daemon else None,
     "fanMin": daemon.get("min") if daemon else None,
     "fanMax": daemon.get("max") if daemon else None,

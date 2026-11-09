@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Drive the iMac's single fan from every temperature sensor it has.
+"""Drive an Intel Mac's fans from every temperature sensor it has.
+
+Written for the iMac15,1 (one fan); also runs a MacBook Pro's two (13,3:
+left and right), each across its own range from the same demand.
 
 mbpfan only looks at coretemp, so a GPU-only load (a game, glmark2) cooks
 the Radeon while the fan sits at its 1200 rpm floor. CPU and GPU alone are
@@ -26,6 +29,7 @@ import glob
 import json
 import os
 import signal
+import struct
 import sys
 import time
 from collections import namedtuple
@@ -71,6 +75,18 @@ MEM_CAP_W = (7.0, 3.0)  # the cap at MEM_CAP_START and at MEM_CAP_FULL
 MEM_CAP_STEP_W = 0.5    # not worth a RAPL write for less
 MEM_CAP_WINDOW_US = 1000000
 
+# A MacBook Pro runs hotter at rest than the iMac, and its SMC CPU probes
+# (TC0E/TC0F) sit ~8°C above the package: on a 13,3 (i7-6700HQ, Radeon Pro)
+# TC0F idled at 64°C and the iMac's curve held both fans near 3300 rpm where
+# the SMC's own control left them at ~2150. Its i7 throttles at 100°C.
+try:
+    MODEL = open("/sys/class/dmi/id/product_name").read().strip()
+except OSError:
+    MODEL = ""
+if MODEL.startswith("MacBook"):
+    CURVES = dict(CURVES, cpu=(70, 92), gpu=(70, 90))
+    PANIC_TEMP = 95
+
 # Ramp limits per tick. Up is fast so a load spike is met within a couple of
 # seconds; down is slow so the fan doesn't hunt on bursty loads.
 RAMP_UP_RPM = 400
@@ -79,22 +95,31 @@ RAMP_DOWN_RPM = 40
 DEADBAND_RPM = 20
 
 
-# Where fan1 lives and what its controls are called. Up to kernel 7.2.5
-# applesmc had its own fan1_manual (1 manual, 0 auto) and fan1_output on the
+# Where the fans live and what their controls are called. Up to kernel 7.2.5
+# applesmc had its own fanN_manual (1 manual, 0 auto) and fanN_output on the
 # platform device. Its conversion to hwmon_device_register_with_info (in
 # linux-omarchy 7.2.8) renamed them, with no aliases, to the standard
-# pwm1_enable (1 manual, 2 auto) and fan1_target under hwmon/hwmon*.
-Fan = namedtuple("Fan", "base enable target manual auto")
+# pwmN_enable (1 manual, 2 auto) and fanN_target under hwmon/hwmon*.
+Fan = namedtuple("Fan", "base n enable target manual auto")
 
 
-def smc_fan():
+def smc_fans():
+    """Every fan the SMC has, fan1 first; [] if none."""
     for path in glob.glob("/sys/devices/platform/applesmc.*"):
-        if os.path.exists(os.path.join(path, "fan1_output")):
-            return Fan(path, "fan1_manual", "fan1_output", 1, 0)
+        old = [Fan(path, n, "fan%d_manual" % n, "fan%d_output" % n, 1, 0)
+               for n in range(1, 10) if os.path.exists("%s/fan%d_output" % (path, n))]
+        if old:
+            return old
         for hwmon in glob.glob(path + "/hwmon/hwmon*"):
-            if os.path.exists(os.path.join(hwmon, "fan1_target")):
-                return Fan(hwmon, "pwm1_enable", "fan1_target", 1, 2)
-    return None
+            new = [Fan(hwmon, n, "pwm%d_enable" % n, "fan%d_target" % n, 1, 2)
+                   for n in range(1, 10) if os.path.exists("%s/fan%d_target" % (hwmon, n))]
+            if new:
+                return new
+    return []
+
+
+def fan_file(fan, what):
+    return os.path.join(fan.base, "fan%d_%s" % (fan.n, what))
 
 
 def hwmon_chip(name):
@@ -203,18 +228,20 @@ def demand(temp, sensor_kind, mode):
     return min(1.0, max(0.0, (temp - start) / (end - start)))
 
 
-def curve_target(found, mode, lo, hi):
-    """The fan target and the sensor that set it, as (rpm, (name, kind, temp))."""
+def curve_demand(found, mode):
+    """How hard to run the fans, 0 (floor) to 1 (max), and the sensor that set
+    it, as (fraction, (name, kind, temp)). Every fan gets the same fraction of
+    its own range."""
     # No sensor at all means flying blind: run at max rather than min.
     if not found:
-        return hi, None
+        return 1.0, None
     # The sensor asking for the most; at rest, the hottest of CPU and GPU. By
     # name, not kind: the SMC's own core probes (TC1c, TCXc...) idle a few
     # degrees off the package reading and took turns with it in the bar.
     driver = max(found, key=lambda r: (demand(r[2], r[1], mode), r[0] in ("cpu", "gpu"), r[2]))
     if mode == "full":
-        return hi, driver
-    return lo + (hi - lo) * demand(driver[2], driver[1], mode), driver
+        return 1.0, driver
+    return demand(driver[2], driver[1], mode), driver
 
 
 def rapl_domain(name):
@@ -282,8 +309,14 @@ class RamCap:
 # PZ5G looks like a total too but jumps 99-126 W at a steady load: a power
 # budget, not a reading. Like the rest of the SMC's key space these are only
 # reachable through applesmc's root-only key_at_index files.
+# A MacBook Pro 13,3 may lack both; its Polaris Radeon does report its own
+# power through amdgpu (GpuPower), and its SMC's system total is PSTR.
 GPU_POWER_KEY = "PGTR"
-DC_POWER_KEY = "PDTR"
+DC_POWER_KEYS = ("PDTR", "PSTR")
+
+# The memory probe to show: the iMac's TM1a (the RAM cap follows it) or a
+# MacBook's TM0P (memory proximity).
+MEM_SENSORS = ("TM1a", "TM0P")
 
 
 class SmcKey:
@@ -305,20 +338,81 @@ class SmcKey:
                     self.base, self.index = base, i
                     return
 
-    def watts(self):
-        """The key as an sp96 (signed, 6 fractional bits) value, rounded."""
+    def type(self):
         if self.base is None:
             return None
         try:
             write_int(os.path.join(self.base, "key_at_index"), self.index)
-            if open(os.path.join(self.base, "key_at_index_type")).read().strip() != "sp96":
-                return None
+            return open(os.path.join(self.base, "key_at_index_type")).read().strip()
+        except OSError:
+            return None
+
+    def watts(self):
+        """The key's value in watts, rounded: sp96 (signed, 6 fractional bits,
+        big-endian) on the iMac15,1, a little-endian float ("flt") on later
+        Macs such as the MacBook Pro 13,3."""
+        kind = self.type()
+        if kind not in ("sp96", "flt"):
+            return None
+        try:
             data = open(os.path.join(self.base, "key_at_index_data"), "rb").read()
         except OSError:
             return None
-        if len(data) != 2:
-            return None
-        return round(int.from_bytes(data, "big", signed=True) / 64, 2)
+        if kind == "sp96" and len(data) == 2:
+            return round(int.from_bytes(data, "big", signed=True) / 64, 2)
+        if kind == "flt" and len(data) == 4:
+            return round(struct.unpack("<f", data)[0], 2)
+        return None
+
+
+class GpuPower:
+    """GPU watts: the SMC's GPU rail if it has one, else amdgpu's own."""
+
+    def __init__(self):
+        self.smc = SmcKey(GPU_POWER_KEY)
+        self.hwmon = None
+        chip = hwmon_chip("amdgpu")
+        for name in ("power1_average", "power1_input"):
+            if chip and read_int(os.path.join(chip, name)) is not None:
+                self.hwmon = os.path.join(chip, name)
+                break
+
+    def watts(self):
+        if self.smc.base is not None and self.smc.watts() is not None:
+            return self.smc.watts()
+        if self.hwmon:
+            uw = read_int(self.hwmon)
+            return round(uw / 1e6, 2) if uw is not None else None
+        return None
+
+
+def first_key(names):
+    for name in names:
+        key = SmcKey(name)
+        if key.base is not None:
+            print("total power from SMC key %s (%s)" % (name, key.type()), file=sys.stderr, flush=True)
+            return key
+    log_power_keys()
+    return key
+
+
+def log_power_keys():
+    """None of the known total-power keys: list the SMC's P* keys (name:type)
+    in the journal, to find this model's own."""
+    found = []
+    for base in glob.glob("/sys/devices/platform/applesmc.*"):
+        for i in range(read_int(os.path.join(base, "key_count")) or 0):
+            if not write_int(os.path.join(base, "key_at_index"), i):
+                break
+            try:
+                name = open(os.path.join(base, "key_at_index_name")).read().strip()
+                if name.startswith("P"):
+                    kind = open(os.path.join(base, "key_at_index_type")).read().strip()
+                    found.append("%s:%s" % (name, kind))
+            except OSError:
+                continue
+    print("no total-power key (%s); SMC power keys: %s" % (", ".join(DC_POWER_KEYS), " ".join(found)),
+          file=sys.stderr, flush=True)
 
 
 def write_status(status):
@@ -333,61 +427,90 @@ def write_status(status):
         pass
 
 
-def release(fan):
-    write_int(os.path.join(fan.base, fan.enable), fan.auto)
+def release(fans):
+    for fan in fans:
+        write_int(os.path.join(fan.base, fan.enable), fan.auto)
+
+
+class Steered:
+    """One fan: its range, the target last written, its ramp."""
+
+    def __init__(self, fan):
+        self.fan = fan
+        self.enable = os.path.join(fan.base, fan.enable)
+        self.target = os.path.join(fan.base, fan.target)
+        self.lo = read_int(fan_file(fan, "min")) or 1200
+        self.hi = read_int(fan_file(fan, "max")) or 2700
+        try:
+            self.label = open(fan_file(fan, "label")).read().strip()
+        except OSError:
+            self.label = "Fan %d" % fan.n
+        self.current = read_int(self.target) or self.lo
+
+    def take(self):
+        return write_int(self.enable, self.fan.manual)
+
+    def steer(self, frac):
+        want = self.lo + (self.hi - self.lo) * frac
+        if want > self.current:
+            step = min(want, self.current + RAMP_UP_RPM)
+        else:
+            step = max(want, self.current - RAMP_DOWN_RPM)
+        step = int(round(max(self.lo, min(self.hi, step))))
+
+        if abs(step - self.current) >= DEADBAND_RPM or step in (self.lo, self.hi):
+            if step != self.current:
+                write_int(self.target, step)
+            self.current = step
+        # The SMC drops manual mode on some events (sleep/resume); take it
+        # back rather than silently leaving the fan to its own curve.
+        if read_int(self.enable) != self.fan.manual:
+            write_int(self.enable, self.fan.manual)
+            write_int(self.target, self.current)
+
+    def status(self):
+        return {"label": self.label, "rpm": read_int(fan_file(self.fan, "input")),
+                "target": self.current, "min": self.lo, "max": self.hi}
 
 
 def main():
-    fan = smc_fan()
-    if not fan:
+    fans = smc_fans()
+    if not fans:
         print("applesmc fan not found", file=sys.stderr)
         return 1
-    smc = fan.base
-    enable = os.path.join(smc, fan.enable)
-    target = os.path.join(smc, fan.target)
+    smc = fans[0].base
+    steered = [Steered(f) for f in fans]
 
-    lo = read_int(os.path.join(smc, "fan1_min")) or 1200
-    hi = read_int(os.path.join(smc, "fan1_max")) or 2700
     probes = smc_probes(smc)
     ram = RamCap()
-    gpu_power = SmcKey(GPU_POWER_KEY)
-    dc_power = SmcKey(DC_POWER_KEY)
+    gpu_power = GpuPower()
+    dc_power = first_key(DC_POWER_KEYS)
 
     def stop(signum, frame):
-        release(fan)
+        release(fans)
         ram.release()
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
 
-    if not write_int(enable, fan.manual):
-        print("cannot take manual control of fan1", file=sys.stderr)
-        return 1
+    for s in steered:
+        if not s.take():
+            print("cannot take manual control of fan%d" % s.fan.n, file=sys.stderr)
+            release(fans)
+            return 1
 
-    current = read_int(target) or lo
     try:
         while True:
             mode = read_mode()
             found = readings(smc, probes)
             temps = {n: t for n, _, t in found}
-            want, driver = curve_target(found, mode, lo, hi)
+            frac, driver = curve_demand(found, mode)
             ram.update(temps.get(MEM_SENSOR))
-            if want > current:
-                step = min(want, current + RAMP_UP_RPM)
-            else:
-                step = max(want, current - RAMP_DOWN_RPM)
-            step = int(round(max(lo, min(hi, step))))
-
-            if abs(step - current) >= DEADBAND_RPM or step in (lo, hi):
-                if step != current:
-                    write_int(target, step)
-                current = step
-            # The SMC drops manual mode on some events (sleep/resume); take
-            # it back rather than silently leaving the fan to its own curve.
-            if read_int(enable) != fan.manual:
-                write_int(enable, fan.manual)
-                write_int(target, current)
+            for s in steered:
+                s.steer(frac)
+            mem = next((m for m in MEM_SENSORS if m in temps), None)
+            fan_status = [s.status() for s in steered]
 
             write_status({
                 "mode": mode,
@@ -398,7 +521,7 @@ def main():
                 "sensor": driver[0] if driver else None,
                 "source": driver[1] if driver else None,
                 "hottest": driver[2] if driver else None,
-                "target": current,
+                "target": fan_status[0]["target"],
                 # RAM power (W) and its cap while TM1a is too hot, else null.
                 "ramWatts": ram.watts(),
                 "ramCap": ram.cap,
@@ -406,14 +529,19 @@ def main():
                 "gpuWatts": gpu_power.watts(),
                 # Whole-iMac power (W): the power supply's DC output.
                 "dcWatts": dc_power.watts(),
-                "rpm": read_int(os.path.join(smc, "fan1_input")),
-                "min": lo,
-                "max": hi,
+                "rpm": fan_status[0]["rpm"],
+                "min": fan_status[0]["min"],
+                "max": fan_status[0]["max"],
+                # Every fan, fan1 first (the fields above repeat fan1).
+                "fans": fan_status,
+                # The memory probe shown (TM1a on the iMac) and its reading.
+                "memSensor": mem,
+                "memTemp": temps.get(mem) if mem else None,
                 "time": time.time(),
             })
             time.sleep(INTERVAL)
     finally:
-        release(fan)
+        release(fans)
         ram.release()
 
 

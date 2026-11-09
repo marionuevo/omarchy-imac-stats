@@ -94,7 +94,19 @@ Panel {
   // An SMC CPU or GPU probe (TC1c, TG0D...) counts as the CPU or GPU reading.
   readonly property string driverKey: stats.daemon !== true || !stats.sensor ? "" :
     (stats.source === "cpu" || stats.source === "gpu") ? String(stats.source) : String(stats.sensor)
-  readonly property bool driverListed: ["cpu", "gpu", "TM1a"].indexOf(driverKey) >= 0
+  readonly property bool driverListed: ["cpu", "gpu", memKey].indexOf(driverKey) >= 0
+
+  // The memory probe shown: TM1a on the iMac, TM0P on a MacBook Pro.
+  readonly property string memKey: stats.memSensor ? String(stats.memSensor) : "TM1a"
+
+  // One gauge per fan: imac-fand's list (a MacBook Pro has two), else the
+  // single fan stats.py reads itself.
+  readonly property var fanList: (stats.fans && stats.fans.length > 0)
+    ? stats.fans.map(function (f) {
+        return { label: stats.fans.length > 1 ? "Fan · " + f.label : "Fan",
+                 rpm: f.rpm, target: f.target, min: f.min, max: f.max }
+      })
+    : [{ label: "Fan", rpm: stats.fan, target: stats.fanTarget, min: stats.fanMin, max: stats.fanMax }]
 
   // ---- Chart: one shared °C scale, one line per sensor. Line colors come
   //      from the theme's own palette, so they follow theme switches.
@@ -119,7 +131,7 @@ Panel {
   readonly property var series: [
     { key: "cpu", driver: "cpu",  label: "CPU",  color: themeColor(["blue", "color4"], "#7aa2f7") },
     { key: "gpu", driver: "gpu",  label: "GPU",  color: themeColor(["yellow", "color3"], "#e0af68") },
-    { key: "mem", driver: "TM1a", label: "TM1a", color: themeColor(["magenta", "color5"], "#ad8ee6") }
+    { key: "mem", driver: memKey, label: memKey, color: themeColor(["magenta", "color5"], "#ad8ee6") }
   ]
 
   readonly property int windowMs: 120000
@@ -354,13 +366,16 @@ Panel {
 
           // Fan gauge: the track is the fan's range, the fill its real rpm and
           // the tick the daemon's target, so a fan still ramping shows a gap.
+          Repeater {
+            model: root.fanList.length
           Item {
             id: fanGauge
             width: parent.width
             implicitHeight: fanHead.implicitHeight + Style.space(6) + track.height + Style.space(4) + fanEnds.implicitHeight + 2 * Style.space(3)
 
-            readonly property real lo: root.stats.fanMin != null ? root.stats.fanMin : 1200
-            readonly property real hi: root.stats.fanMax != null ? root.stats.fanMax : 2700
+            readonly property var fan: root.fanList[index] || ({})
+            readonly property real lo: fan.min != null ? fan.min : 1200
+            readonly property real hi: fan.max != null ? fan.max : 2700
             function frac(rpm) {
               return rpm == null || hi <= lo ? 0 : Math.max(0, Math.min(1, (rpm - lo) / (hi - lo)))
             }
@@ -375,7 +390,7 @@ Panel {
               Text {
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                text: "Fan"
+                text: fanGauge.fan.label || "Fan"
                 color: root.bar ? root.bar.foreground : Color.foreground
                 opacity: 0.6
                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -390,15 +405,15 @@ Panel {
 
                 Text {
                   id: fanValue
-                  text: root.fmt(root.stats.fan, " rpm")
+                  text: root.fmt(fanGauge.fan.rpm, " rpm")
                   color: root.bar ? root.bar.foreground : Color.foreground
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.bodySmall
                 }
 
                 Text {
-                  visible: root.stats.fanTarget != null
-                  text: "target " + root.stats.fanTarget
+                  visible: fanGauge.fan.target != null
+                  text: "target " + fanGauge.fan.target
                   color: Color.accent
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.bodySmall
@@ -417,18 +432,18 @@ Panel {
               color: Util.alpha(root.bar ? root.bar.foreground : Color.foreground, 0.1)
 
               Rectangle {
-                width: Math.max(parent.height, parent.width * fanGauge.frac(root.stats.fan))
+                width: Math.max(parent.height, parent.width * fanGauge.frac(fanGauge.fan.rpm))
                 height: parent.height
                 radius: parent.radius
-                visible: root.stats.fan != null
+                visible: fanGauge.fan.rpm != null
                 color: Util.alpha(root.bar ? root.bar.foreground : Color.foreground, 0.55)
                 Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
               }
 
               // Target tick, taller than the track, with a surface ring.
               Rectangle {
-                visible: root.stats.fanTarget != null
-                x: Math.round(parent.width * fanGauge.frac(root.stats.fanTarget) - width / 2)
+                visible: fanGauge.fan.target != null
+                x: Math.round(parent.width * fanGauge.frac(fanGauge.fan.target) - width / 2)
                 anchors.verticalCenter: parent.verticalCenter
                 width: Style.space(3)
                 height: parent.height + Style.space(6)
@@ -451,7 +466,7 @@ Panel {
               Text {
                 id: fanMinText
                 anchors.left: parent.left
-                text: root.fmt(root.stats.fanMin, "")
+                text: root.fmt(fanGauge.fan.min, "")
                 color: root.bar ? root.bar.foreground : Color.foreground
                 opacity: 0.45
                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -460,7 +475,7 @@ Panel {
 
               Text {
                 anchors.right: parent.right
-                text: root.fmt(root.stats.fanMax, " rpm")
+                text: root.fmt(fanGauge.fan.max, " rpm")
                 color: root.bar ? root.bar.foreground : Color.foreground
                 opacity: 0.45
                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -468,9 +483,10 @@ Panel {
               }
             }
           }
+          }
           InfoPair { label: "CPU";    value: root.fmt(root.stats.cpuTemp, "°C"); driving: root.driverKey === "cpu" }
           InfoPair { label: "GPU";    value: root.fmt(root.stats.gpuTemp, "°C"); driving: root.driverKey === "gpu" }
-          InfoPair { label: "Memory (TM1a)"; value: root.fmt(root.stats.memTemp, "°C"); driving: root.driverKey === "TM1a" }
+          InfoPair { label: "Memory (" + root.memKey + ")"; value: root.fmt(root.stats.memTemp, "°C"); driving: root.driverKey === root.memKey }
           // Only while imac-fand caps the RAM's power (TM1a too hot); its
           // power the rest of the time is the power widget's to show.
           InfoPair {

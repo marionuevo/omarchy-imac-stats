@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Omarchy](https://img.shields.io/badge/omarchy-shell%20plugin-1793d1)](https://omarchy.org)
 
-A minimal `bar-widget` plugin for the [Omarchy](https://omarchy.org/) shell (Quickshell) on an Intel iMac, plus a small fan daemon. Shows fan RPM, CPU/GPU temp and usage, memory temp and RAM usage, and disk usage. Each reading is an icon and two stacked rows: the temperature (or the fan's rpm) on top, and below a meter whose outline is the whole range and whose fill is the current value (usage, or the rpm within the fan's range). The disk has only its meter. Every reading keeps a fixed width, so the widgets to the right never shift. Clicking opens a fan mode picker, with the reading that drives the fan highlighted and a chart of the last two minutes of CPU, GPU and memory temps.
+A minimal `bar-widget` plugin for the [Omarchy](https://omarchy.org/) shell (Quickshell) on an Intel iMac (also a MacBook Pro 13,3, see below), plus a small fan daemon. Shows fan RPM, CPU/GPU temp and usage, memory temp and RAM usage, and disk usage. Each reading is an icon and two stacked rows: the temperature (or the fan's rpm) on top, and below a meter whose outline is the whole range and whose fill is the current value (usage, or the rpm within the fan's range). The disk has only its meter. Every reading keeps a fixed width, so the widgets to the right never shift. Clicking opens a fan mode picker, with the reading that drives the fan highlighted and a chart of the last two minutes of CPU, GPU and memory temps.
 
 ![The bar and the panel: the CPU drives the fan, and a chart of the last two minutes of CPU, GPU and memory temps](docs/screenshot.png)
 
@@ -65,6 +65,16 @@ Curves in **normal** mode, as the temperature where the fan leaves its 1200 rpm 
 **Silent** moves every curve up by 8°C at the floor and 5°C at the max; **full** is always max. In every mode, CPU or GPU at 90°C or more means full speed, and so does losing every sensor. Probes that read below 20°C or from 127°C up (absent or broken: the SMC reports them as −127, 0, 1…) are ignored. The Radeon idles around 55°C, so its knee sits above that; the memory idles near 48°C and reached 68°C with the fan at full speed under the 4K stream. The panel shows which sensor is driving the fan. Ramp is up to +400 rpm per second, down at −40 rpm per second, so bursty loads don't make the fan hunt.
 
 The mode lives in `/var/lib/imac-fan/mode`, the only file the desktop user may write; the daemon treats anything that isn't a known mode as `normal`. It survives reboots. The daemon publishes what it is doing in `/run/imac-fan/status.json`, which the widget reads.
+
+## MacBook Pro
+
+Also runs on a MacBook Pro 13,3 (15", 2016: i7-6700HQ, Radeon Pro 450/455/460, two fans). What changes there:
+
+- **Two fans.** `imac-fand` drives every fan the SMC has (left 2160–5927 rpm, right 2000–5489), each at the same fraction of its own range. The panel shows one gauge per fan; the bar shows fan1. `status.json` keeps the fan1 fields and adds a `fans` list.
+- **Curves.** The SMC's CPU probes (TC0E/TC0F) idle ~8°C above the package, and with the iMac's curve the fans sat near 3300 rpm at rest. On any `MacBook*` model the CPU curve is 70→92°C, the GPU 70→90°C, and full speed comes at 95°C. At rest both fans stay at their floor, as under the SMC's own control.
+- **Memory.** No TM1a; the memory reading is `TM0P`. The RAM power cap stays iMac-only (it follows TM1a).
+- **Power.** No `PGTR`: GPU watts come from `amdgpu`'s own `power1_input` (Polaris reports it). The total is `PDTR` again, but as a little-endian float (`flt`) instead of `sp96`. The daemon logs which key and type it uses, or lists the SMC's power keys if it finds none.
+- The `power/` profile limits are iMac-only (Haswell without HWP); not installed on the MacBook. The panel's "Full speed above 90°C" text still says 90.
 
 ## Power profiles that do something
 

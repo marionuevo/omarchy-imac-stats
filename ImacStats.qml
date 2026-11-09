@@ -57,7 +57,10 @@ BarWidget {
     // Another SMC probe in charge (TM2d, a board sensor...) is shown next to
     // the rpm, already marked; the CPU, GPU and memory readings are marked
     // in place.
-    readonly property bool otherDriver: driverKey !== "" && ["cpu", "gpu", "TM1a"].indexOf(driverKey) < 0
+    readonly property bool otherDriver: driverKey !== "" && ["cpu", "gpu", memKey].indexOf(driverKey) < 0
+
+    // The memory probe shown: TM1a on the iMac, TM0P on a MacBook Pro.
+    readonly property string memKey: stats.memSensor ? String(stats.memSensor) : "TM1a"
 
     function parseStats(raw) {
         try {
@@ -308,7 +311,7 @@ BarWidget {
             Reading {
                 icon: ""
                 value: root.fmt(root.stats.memTemp, "°C")
-                drives: root.driverKey === "TM1a"
+                drives: root.driverKey === root.memKey
                 flag: root.stats.ramCap != null
                 fill: root.fraction(root.stats.ram, 0, 100)
             }
