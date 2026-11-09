@@ -151,6 +151,19 @@ gpu_pct = finish_gpu_usage(gpu_proc)
 fan = fan_rpm()
 daemon = fan_status()
 
+
+def panic_temp():
+    # Full speed from here in any mode: imac-fand's own figure, or the same
+    # rule it applies (95°C on a MacBook, 90°C otherwise) when an older daemon
+    # doesn't publish it or none is running.
+    if daemon and daemon.get("panicTemp") is not None:
+        return daemon["panicTemp"]
+    try:
+        model = open("/sys/class/dmi/id/product_name").read().strip()
+    except OSError:
+        model = ""
+    return 95 if model.startswith("MacBook") else 90
+
 print(json.dumps({
     "fan": fan,
     # Every fan as imac-fand reports it (label, rpm, target, min, max);
@@ -164,6 +177,7 @@ print(json.dumps({
     "sensor": daemon.get("sensor") if daemon else None,
     "hottest": daemon.get("hottest") if daemon else None,
     "daemon": daemon is not None,
+    "panicTemp": panic_temp(),
     # RAM power and its cap (W), from the daemon: RAPL energy is root-only.
     "ramWatts": daemon.get("ramWatts") if daemon else None,
     "ramCap": daemon.get("ramCap") if daemon else None,

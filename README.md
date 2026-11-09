@@ -62,7 +62,7 @@ Curves in **normal** mode, as the temperature where the fan leaves its 1200 rpm 
 | Memory | `TM*`, `Tm*` | 58°C | 72°C |
 | Board (PCH, power supply, SSD, LCD, air) | the rest | 60°C | 80°C |
 
-**Silent** moves every curve up by 8°C at the floor and 5°C at the max; **full** is always max. In every mode, CPU or GPU at 90°C or more means full speed, and so does losing every sensor. Probes that read below 20°C or from 127°C up (absent or broken: the SMC reports them as −127, 0, 1…) are ignored. The Radeon idles around 55°C, so its knee sits above that; the memory idles near 48°C and reached 68°C with the fan at full speed under the 4K stream. The panel shows which sensor is driving the fan. Ramp is up to +400 rpm per second, down at −40 rpm per second, so bursty loads don't make the fan hunt.
+**Silent** moves every curve up by 8°C at the floor and 5°C at the max; **full** is always max. In every mode, CPU or GPU at 90°C or more (95°C on a MacBook) means full speed, and so does losing every sensor. Probes that read below 20°C or from 127°C up (absent or broken: the SMC reports them as −127, 0, 1…) are ignored. The Radeon idles around 55°C, so its knee sits above that; the memory idles near 48°C and reached 68°C with the fan at full speed under the 4K stream. The panel shows which sensor is driving the fan. Ramp is up to +400 rpm per second, down at −40 rpm per second, so bursty loads don't make the fan hunt.
 
 The mode lives in `/var/lib/imac-fan/mode`, the only file the desktop user may write; the daemon treats anything that isn't a known mode as `normal`. It survives reboots. The daemon publishes what it is doing in `/run/imac-fan/status.json`, which the widget reads.
 
@@ -74,7 +74,7 @@ Also runs on a MacBook Pro 13,3 (15", 2016: i7-6700HQ, Radeon Pro 450/455/460, t
 - **Curves.** The SMC's CPU probes (TC0E/TC0F) idle ~8°C above the package, and with the iMac's curve the fans sat near 3300 rpm at rest. On any `MacBook*` model the CPU curve is 70→92°C, the GPU 70→90°C, and full speed comes at 95°C. At rest both fans stay at their floor, as under the SMC's own control.
 - **Memory.** No TM1a; the memory reading is `TM0P`. The RAM power cap stays iMac-only (it follows TM1a).
 - **Power.** No `PGTR`: GPU watts come from `amdgpu`'s own `power1_input` (Polaris reports it). The total is `PDTR` again, but as a little-endian float (`flt`) instead of `sp96`. The daemon logs which key and type it uses, or lists the SMC's power keys if it finds none.
-- The `power/` profile limits are iMac-only (Haswell without HWP); not installed on the MacBook. The panel's "Full speed above 90°C" text still says 90.
+- The `power/` profile limits are iMac-only (Haswell without HWP); not installed on the MacBook.
 
 ## Power profiles that do something
 

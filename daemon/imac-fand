@@ -531,6 +531,8 @@ def main():
                 "dcWatts": dc_power.watts(),
                 "rpm": fan_status[0]["rpm"],
                 "min": fan_status[0]["min"],
+                # CPU or GPU at this temperature means full speed in any mode.
+                "panicTemp": PANIC_TEMP,
                 "max": fan_status[0]["max"],
                 # Every fan, fan1 first (the fields above repeat fan1).
                 "fans": fan_status,

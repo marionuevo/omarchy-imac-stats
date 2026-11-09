@@ -578,7 +578,7 @@ Panel {
           Text {
             width: parent.width
             wrapMode: Text.WordWrap
-            text: "Full speed above 90°C in every mode. The mode survives reboots."
+            text: "Full speed above " + (root.stats.panicTemp != null ? root.stats.panicTemp : 90) + "°C in every mode. The mode survives reboots."
             color: root.bar ? root.bar.foreground : Color.foreground
             opacity: 0.45
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
